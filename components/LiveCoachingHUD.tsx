@@ -3,15 +3,20 @@ import React, { useRef, useState, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { PoseLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import { decodeBase64, decodeAudioData, createPcmBlob } from '../services/audioUtils';
+import { formatElevenLabsErrorForUi, synthesizeSpeech } from '../services/elevenLabsService';
 import { FrameData } from '../types';
 
 interface LiveCoachingHUDProps {
   exercise: string;
   onComplete: (frames: FrameData[]) => void;
   onCancel: () => void;
+  onTtsError?: (message: string) => void;
 }
 
-const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete, onCancel }) => {
+const DEFAULT_TTS_PROVIDER = 'elevenlabs' as const;
+type TtsProvider = typeof DEFAULT_TTS_PROVIDER | 'gemini-native';
+
+const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete, onCancel, onTtsError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -25,6 +30,10 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionRef = useRef<any>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
+  const ttsProviderRef = useRef<TtsProvider>(DEFAULT_TTS_PROVIDER);
+  const latestCueRef = useRef<string>('');
+  const hasMissingKeyNotificationRef = useRef<boolean>(false);
+  const isClosedRef = useRef<boolean>(false);
 
   const drawOctopusFaceOverlay = (
     ctx: CanvasRenderingContext2D,
@@ -52,6 +61,103 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
     let stream: MediaStream | null = null;
     let frameInterval: number | null = null;
     let animationFrameId: number | null = null;
+    let inputAudioContext: AudioContext | null = null;
+    isClosedRef.current = false;
+
+    const stopAudioAndSession = async () => {
+      isClosedRef.current = true;
+      if (sessionRef.current) sessionRef.current.close();
+      sourcesRef.current.forEach(s => s.stop());
+      sourcesRef.current.clear();
+      nextStartTimeRef.current = 0;
+      latestCueRef.current = '';
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        await audioContextRef.current.close().catch(() => undefined);
+      }
+      if (inputAudioContext && inputAudioContext.state !== 'closed') {
+        await inputAudioContext.close().catch(() => undefined);
+      }
+    };
+
+    const queueAudioBuffer = (buffer: AudioBuffer) => {
+      const ctx = audioContextRef.current;
+      if (!ctx || isClosedRef.current) return;
+
+      nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      source.start(nextStartTimeRef.current);
+      nextStartTimeRef.current += buffer.duration;
+      sourcesRef.current.add(source);
+      source.onended = () => sourcesRef.current.delete(source);
+    };
+
+    const playGeminiAudioChunk = async (audioBase64?: string | null) => {
+      if (!audioBase64 || !audioContextRef.current || isClosedRef.current) return false;
+      try {
+        const ctx = audioContextRef.current;
+        const buffer = await decodeAudioData(decodeBase64(audioBase64), ctx, 24000, 1);
+        queueAudioBuffer(buffer);
+        return true;
+      } catch (error) {
+        console.error('Failed to play Gemini native audio chunk:', error);
+        return false;
+      }
+    };
+
+    const decodeElevenLabsBuffer = async (audioBytes: ArrayBuffer) => {
+      const ctx = audioContextRef.current;
+      if (!ctx || isClosedRef.current) return null;
+
+      try {
+        return await ctx.decodeAudioData(audioBytes.slice(0));
+      } catch (error) {
+        throw new Error(
+          `Unable to decode ElevenLabs audio response: ${error instanceof Error ? error.message : 'Unknown decode error'}`
+        );
+      }
+    };
+
+    const getCueTextFromMessage = (msg: LiveServerMessage) => {
+      // Read only what is shown on-screen in the "Live Cue" panel.
+      return msg.serverContent?.outputTranscription?.text?.trim() || '';
+    };
+
+    const notifyTtsError = (message: string) => {
+      if (onTtsError) onTtsError(message);
+      console.error(message);
+    };
+
+    const speakWithDefaultProvider = async (cueText: string, fallbackAudioBase64?: string | null) => {
+      const provider = ttsProviderRef.current;
+
+      if (provider === 'gemini-native') {
+        await playGeminiAudioChunk(fallbackAudioBase64);
+        return;
+      }
+
+      try {
+        const audioBytes = await synthesizeSpeech(cueText);
+        if (isClosedRef.current) return;
+        const decoded = await decodeElevenLabsBuffer(audioBytes);
+        if (isClosedRef.current) return;
+        if (!decoded) throw new Error('Audio context is not available.');
+        queueAudioBuffer(decoded);
+      } catch (error) {
+        const formattedError = formatElevenLabsErrorForUi(error);
+        const isMissingKeyError = typeof error === 'object' && !!error && (error as any).code === 'missing_api_key';
+        if (!isMissingKeyError || !hasMissingKeyNotificationRef.current) {
+          notifyTtsError(formattedError);
+          if (isMissingKeyError) hasMissingKeyNotificationRef.current = true;
+        }
+
+        const fallbackPlayed = await playGeminiAudioChunk(fallbackAudioBase64);
+        if (!fallbackPlayed) {
+          setStatus('Audio fallback unavailable; continuing coaching...');
+        }
+      }
+    };
 
     const initVision = async () => {
       try {
@@ -86,7 +192,7 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
         if (videoRef.current) videoRef.current.srcObject = stream;
 
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        const inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
 
         const sessionPromise = ai.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -133,24 +239,22 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
                 setTranscription(prev => (prev + " " + msg.serverContent?.outputTranscription?.text).slice(-150));
               }
 
-              const audioBase64 = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-              if (audioBase64 && audioContextRef.current) {
-                const ctx = audioContextRef.current;
-                nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-                const buffer = await decodeAudioData(decodeBase64(audioBase64), ctx, 24000, 1);
-                const source = ctx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(ctx.destination);
-                source.start(nextStartTimeRef.current);
-                nextStartTimeRef.current += buffer.duration;
-                sourcesRef.current.add(source);
-                source.onended = () => sourcesRef.current.delete(source);
+              const audioBase64 =
+                msg.serverContent?.modelTurn?.parts?.find((part: any) => !!part?.inlineData?.data)?.inlineData?.data;
+              const cueText = getCueTextFromMessage(msg);
+
+              if (cueText && cueText !== latestCueRef.current) {
+                latestCueRef.current = cueText;
+                await speakWithDefaultProvider(cueText, audioBase64);
+              } else if (audioBase64 && ttsProviderRef.current === 'gemini-native') {
+                await playGeminiAudioChunk(audioBase64);
               }
 
               if (msg.serverContent?.interrupted) {
                 sourcesRef.current.forEach(s => s.stop());
                 sourcesRef.current.clear();
                 nextStartTimeRef.current = 0;
+                latestCueRef.current = '';
               }
             },
             onerror: (e) => console.error("Live Error:", e),
@@ -252,14 +356,35 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
       if (frameInterval) clearInterval(frameInterval);
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       if (stream) stream.getTracks().forEach(t => t.stop());
-      if (sessionRef.current) sessionRef.current.close();
       if (poseLandmarkerRef.current) poseLandmarkerRef.current.close();
+      stopAudioAndSession();
     };
   }, [exercise]);
 
   const handleFinish = () => {
+    isClosedRef.current = true;
+    sourcesRef.current.forEach(s => s.stop());
+    sourcesRef.current.clear();
+    nextStartTimeRef.current = 0;
+    latestCueRef.current = '';
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => undefined);
+    }
     if (sessionRef.current) sessionRef.current.close();
     onComplete(capturedFrames);
+  };
+
+  const handleCancel = () => {
+    isClosedRef.current = true;
+    sourcesRef.current.forEach(s => s.stop());
+    sourcesRef.current.clear();
+    nextStartTimeRef.current = 0;
+    latestCueRef.current = '';
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => undefined);
+    }
+    if (sessionRef.current) sessionRef.current.close();
+    onCancel();
   };
 
   return (
@@ -281,7 +406,7 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
             </div>
             
             <button 
-              onClick={onCancel}
+              onClick={handleCancel}
               className="pointer-events-auto w-10 h-10 bg-white/10 hover:bg-rose-500/50 backdrop-blur-xl rounded-full flex items-center justify-center border border-white/10 transition-colors"
             >
               <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">

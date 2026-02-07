@@ -77,7 +77,7 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error(err);
-      setError("Analysis encountered an error.");
+      setError(err instanceof Error ? `Analysis error: ${err.message}` : "Analysis encountered an error.");
     } finally {
       setIsAnalyzingReport(false);
     }
@@ -227,6 +227,7 @@ const App: React.FC = () => {
           exercise={isCoachingActive.type} 
           onComplete={handleSessionComplete}
           onCancel={() => setIsCoachingActive(null)}
+          onTtsError={(message) => setError(message)}
         />
       )}
 

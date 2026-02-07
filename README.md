@@ -15,6 +15,13 @@ View your app in AI Studio: https://ai.studio/apps/drive/1oC-KpZVF5Yaff0ezHYiDbv
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+2. Set these keys in [.env.local](.env.local):
+   - `GEMINI_API_KEY` (required)
+   - `VITE_ELEVEN_LABS_API_KEY` (required for default live-coaching voice)
+   - `VITE_ELEVEN_LABS_VOICE_ID` (optional override)
 3. Run the app:
    `npm run dev`
+
+## Live Coaching Audio
+
+Live coaching defaults to ElevenLabs TTS using Gemini-generated cue text. If ElevenLabs fails for any cue, the app automatically falls back to Gemini native audio and shows an error notification with provider details.

@@ -4,6 +4,75 @@ import { AnalysisFeedback, FrameData, WorkoutRoutine } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const extractJsonFromText = (input: string): string => {
+  const trimmed = input.trim();
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch?.[1]) {
+    const fenced = fencedMatch[1].trim();
+    if (fenced.startsWith('{') && fenced.endsWith('}')) return fenced;
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  return trimmed;
+};
+
+const getResponseText = (response: any): string | undefined => {
+  if (!response) return undefined;
+  if (typeof response === 'string') return response;
+  if (typeof response?.text === 'string' && response.text.trim()) return response.text;
+  if (typeof response?.outputText === 'string' && response.outputText.trim()) return response.outputText;
+
+  const candidateText =
+    response?.candidates?.[0]?.content?.parts
+      ?.map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  if (candidateText) return candidateText;
+
+  if (Array.isArray(response) && response.length > 0) {
+    for (const item of response) {
+      const nested = getResponseText(item);
+      if (nested) return nested;
+    }
+  }
+
+  return undefined;
+};
+
+const toStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(item => (typeof item === 'string' ? item : item == null ? '' : String(item)))
+    .map(item => item.trim())
+    .filter(Boolean);
+};
+
+const normalizeAnalysisFeedback = (parsed: any, selectedExercise: string): AnalysisFeedback => {
+  const scoreCandidate = Number(parsed?.score ?? parsed?.formScore ?? 0);
+  const boundedScore = Number.isFinite(scoreCandidate)
+    ? Math.max(0, Math.min(100, Math.round(scoreCandidate)))
+    : 0;
+
+  return {
+    exerciseName: String(parsed?.exerciseName ?? parsed?.exercise ?? selectedExercise),
+    score: boundedScore,
+    pros: toStringArray(parsed?.pros ?? parsed?.strengths),
+    cons: toStringArray(parsed?.cons ?? parsed?.issues ?? parsed?.improvements),
+    suggestions: toStringArray(parsed?.suggestions ?? parsed?.recommendations),
+    safetyWarnings: toStringArray(parsed?.safetyWarnings ?? parsed?.safety),
+    overallSummary: String(parsed?.overallSummary ?? parsed?.summary ?? 'No summary provided.'),
+  };
+};
+
 export const analyzeForm = async (
   frames: FrameData[],
   selectedExercise: string
@@ -48,10 +117,32 @@ export const analyzeForm = async (
   });
 
   const response = await model;
-  const text = response.text;
-  if (!text) throw new Error("No response from AI");
-  
-  return JSON.parse(text) as AnalysisFeedback;
+
+  let text: string | undefined = getResponseText(response);
+  if (!text && response && typeof response === 'object' && (response as any).parsed) {
+    text = JSON.stringify((response as any).parsed);
+  }
+
+  if (!text) {
+    console.error('AI response had no text field. Full response:', response);
+    throw new Error('No textual response from AI (response shape unexpected).');
+  }
+
+  // Try parsing JSON with helpful errors
+  let parsed: any;
+  try {
+    parsed = JSON.parse(extractJsonFromText(text));
+  } catch (err) {
+    console.error('Failed to parse AI response as JSON. Raw text:', text.slice(0, 1000));
+    throw new Error('AI returned non-JSON or malformed JSON. See console for raw output.');
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    console.error('Parsed AI response is not an object:', parsed);
+    throw new Error('AI analysis payload is invalid.');
+  }
+
+  return normalizeAnalysisFeedback(parsed, selectedExercise);
 };
 
 export const suggestWorkout = async (
@@ -99,7 +190,29 @@ export const suggestWorkout = async (
     }
   });
 
-  const result = JSON.parse(response.text || '{}');
+  let text: string | undefined = getResponseText(response);
+  if (!text && response && typeof response === 'object' && (response as any).parsed) {
+    text = JSON.stringify((response as any).parsed);
+  }
+
+  if (!text) {
+    console.error('Unexpected suggestWorkout response shape:', response);
+    throw new Error('No textual response from AI for suggestWorkout');
+  }
+
+  let result: any;
+  try {
+    result = JSON.parse(extractJsonFromText(text || '{}'));
+  } catch (err) {
+    console.error('Failed to parse suggestWorkout response JSON:', text.slice(0, 1000));
+    throw new Error('AI returned malformed JSON for suggestWorkout');
+  }
+
+  if (!result || !result.routine || !Array.isArray(result.routine.exercises)) {
+    console.error('suggestWorkout result missing routine/exercises:', result);
+    throw new Error('Invalid routine format received from AI');
+  }
+
   return {
     routine: {
       ...result.routine,
