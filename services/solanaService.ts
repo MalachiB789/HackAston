@@ -103,7 +103,7 @@ export const distributeRevenue = async (recipientAddress: string, amountSOL: num
             SystemProgram.transfer({
                 fromPubkey: treasury.publicKey,
                 toPubkey: new PublicKey(recipientAddress),
-                lamports: amountSOL * LAMPORTS_PER_SOL,
+                lamports: Math.round(amountSOL * LAMPORTS_PER_SOL),
             })
         );
 
