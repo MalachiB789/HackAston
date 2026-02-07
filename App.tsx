@@ -475,6 +475,7 @@ const App: React.FC = () => {
               onLogSet={handleLogSet}
               onUpdateSet={handleUpdateSet}
               onDeleteSet={handleDeleteSet}
+              workoutHistory={workoutHistory}
               onLaunchCoach={(exId, type) => setIsCoachingActive({ exId, type })}
               onFinish={handleFinishWorkoutSession}
             />

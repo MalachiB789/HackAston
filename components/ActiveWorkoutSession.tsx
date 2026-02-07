@@ -1,17 +1,26 @@
 
-import React, { useState } from 'react';
-import { WorkoutRoutine, SetLog, ExerciseType } from '../types';
+import React, { useMemo, useState } from 'react';
+import { WorkoutRoutine, SetLog, ExerciseType, WorkoutHistoryEntry } from '../types';
 
 interface ActiveWorkoutSessionProps {
   workout: WorkoutRoutine;
   onLogSet: (exerciseId: string, set: SetLog) => void;
   onUpdateSet: (exerciseId: string, setId: string, updates: Pick<SetLog, 'weight' | 'reps'>) => void;
   onDeleteSet: (exerciseId: string, setId: string) => void;
+  workoutHistory: WorkoutHistoryEntry[];
   onLaunchCoach: (exerciseId: string, type: ExerciseType) => void;
   onFinish: () => void;
 }
 
-const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, onLogSet, onUpdateSet, onDeleteSet, onLaunchCoach, onFinish }) => {
+const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({
+  workout,
+  onLogSet,
+  onUpdateSet,
+  onDeleteSet,
+  workoutHistory,
+  onLaunchCoach,
+  onFinish
+}) => {
   const [activeExerciseIdx, setActiveExerciseIdx] = useState(0);
   const [weight, setWeight] = useState(0);
   const [reps, setReps] = useState(0);
@@ -20,6 +29,20 @@ const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, on
   const [editingReps, setEditingReps] = useState(0);
 
   const activeExercise = workout.exercises[activeExerciseIdx];
+  const latestSessionForRoutine = useMemo(
+    () =>
+      [...workoutHistory]
+        .filter(entry => entry.routineId === workout.id)
+        .sort((a, b) => b.performedAt - a.performedAt)[0],
+    [workout.id, workoutHistory]
+  );
+  const previousExercise = useMemo(
+    () =>
+      latestSessionForRoutine?.exercises.find(
+        ex => ex.type.toLowerCase() === activeExercise.type.toLowerCase()
+      ),
+    [activeExercise.type, latestSessionForRoutine]
+  );
 
   const handleAddSet = () => {
     if (reps <= 0) return;
@@ -119,6 +142,21 @@ const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, on
           >
             Log Set
           </button>
+
+          {previousExercise && previousExercise.sets.length > 0 && (
+            <div className="space-y-2 bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
+              <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                Previous Session ({new Date(latestSessionForRoutine!.performedAt).toLocaleDateString()})
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {previousExercise.sets.map((set, idx) => (
+                  <span key={set.id} className="px-2 py-1 rounded-md bg-zinc-900 text-zinc-200 text-[10px] font-bold">
+                    {idx + 1}: {set.weight}kg x {set.reps}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest border-b border-zinc-800 pb-2">Completed Sets</h4>
