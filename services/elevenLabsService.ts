@@ -1,3 +1,5 @@
+import { ElevenLabsClient } from 'elevenlabs';
+
 export interface ElevenLabsTtsError extends Error {
   code:
     | 'missing_api_key'
@@ -19,7 +21,6 @@ interface SynthesizeSpeechOptions {
 
 const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
 const DEFAULT_MODEL_ID = 'eleven_turbo_v2_5';
-const ELEVEN_LABS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 
 const createElevenLabsError = (
   message: string,
@@ -37,33 +38,10 @@ const createElevenLabsError = (
   return err;
 };
 
-const parseProviderMessage = async (response: Response): Promise<string> => {
-  const contentType = response.headers.get('content-type') || '';
-
-  if (contentType.includes('application/json')) {
-    const payload = await response.json().catch(() => null);
-    const detail = payload?.detail;
-    if (typeof detail === 'string') return detail;
-    if (Array.isArray(detail)) {
-      return detail
-        .map((d: any) => d?.msg || d?.message || JSON.stringify(d))
-        .filter(Boolean)
-        .join('; ');
-    }
-    if (detail?.message) return String(detail.message);
-    if (payload?.message) return String(payload.message);
-    if (payload?.error) return String(payload.error);
-    return JSON.stringify(payload).slice(0, 400);
-  }
-
-  const text = await response.text().catch(() => '');
-  return text.slice(0, 400);
-};
-
 export const synthesizeSpeech = async (
   text: string,
   options: SynthesizeSpeechOptions = {}
-): Promise<ArrayBuffer> => {
+): Promise<ArrayBuffer> => { // Explicitly return Promise<ArrayBuffer>
   const apiKey = process.env.ELEVEN_LABS_API_KEY;
   if (!apiKey) {
     throw createElevenLabsError(
@@ -77,56 +55,55 @@ export const synthesizeSpeech = async (
     throw createElevenLabsError('Cannot synthesize empty text.', 'missing_text');
   }
 
+  const client = new ElevenLabsClient({ apiKey });
   const voiceId = options.voiceId || process.env.ELEVEN_LABS_VOICE_ID || DEFAULT_VOICE_ID;
   const modelId = options.modelId || DEFAULT_MODEL_ID;
-  const url = `${ELEVEN_LABS_URL}/${voiceId}`;
 
-  let response: Response;
   try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'xi-api-key': apiKey,
-        'Content-Type': 'application/json',
-        'Accept': 'audio/mpeg',
-      },
-      body: JSON.stringify({
-        text: trimmed,
-        model_id: modelId,
-      }),
+    const audioStream = await client.textToSpeech.convert(voiceId, {
+      text: trimmed,
+      model_id: modelId,
+      output_format: 'mp3_44100_128',
     });
+
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of audioStream) {
+      chunks.push(chunk);
+    }
+
+    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const content = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      content.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    if (content.byteLength === 0) {
+      throw createElevenLabsError(
+        'ElevenLabs returned an empty audio response.',
+        'invalid_response'
+      );
+    }
+
+    return content.buffer;
+
   } catch (error) {
+    if ((error as any).statusCode) {
+       throw createElevenLabsError(
+        `ElevenLabs TTS failed: ${(error as any).body?.message || (error as any).message}`,
+        'http_error',
+        {
+            status: (error as any).statusCode,
+            details: (error as any).body ? JSON.stringify((error as any).body) : undefined
+        }
+       );
+    }
     throw createElevenLabsError(
       `ElevenLabs request failed: ${error instanceof Error ? error.message : 'Unknown network error'}`,
       'request_failed'
     );
   }
-
-  if (!response.ok) {
-    const requestId = response.headers.get('x-request-id') || response.headers.get('request-id') || undefined;
-    const providerMessage = await parseProviderMessage(response);
-    throw createElevenLabsError(
-      `ElevenLabs TTS failed (${response.status} ${response.statusText}).`,
-      'http_error',
-      {
-        status: response.status,
-        statusText: response.statusText,
-        requestId,
-        providerMessage,
-        details: providerMessage,
-      }
-    );
-  }
-
-  const audioBuffer = await response.arrayBuffer();
-  if (!audioBuffer || audioBuffer.byteLength === 0) {
-    throw createElevenLabsError(
-      'ElevenLabs returned an empty audio response.',
-      'invalid_response'
-    );
-  }
-
-  return audioBuffer;
 };
 
 export const formatElevenLabsErrorForUi = (error: unknown): string => {

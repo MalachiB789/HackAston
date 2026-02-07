@@ -35,11 +35,6 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
   const hasMissingKeyNotificationRef = useRef<boolean>(false);
   const isClosedRef = useRef<boolean>(false);
 
-  // Buffer incoming text deltas until we have a full sentence
-  const textBufferRef = useRef<string>('');
-  const processingQueueRef = useRef<string[]>([]);
-  const isProcessingRef = useRef<boolean>(false);
-
   const drawOctopusFaceOverlay = (
     ctx: CanvasRenderingContext2D,
     landmarks: Array<{ x: number; y: number }>
@@ -82,10 +77,6 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
       if (inputAudioContext && inputAudioContext.state !== 'closed') {
         await inputAudioContext.close().catch(() => undefined);
       }
-      // Clear buffers
-      textBufferRef.current = '';
-      processingQueueRef.current = [];
-      isProcessingRef.current = false;
     };
 
     const queueAudioBuffer = (buffer: AudioBuffer) => {
@@ -168,20 +159,6 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
       }
     };
 
-    const processQueue = async () => {
-      if (isProcessingRef.current) return;
-      isProcessingRef.current = true;
-
-      while (processingQueueRef.current.length > 0 && !isClosedRef.current) {
-        const textToSpeak = processingQueueRef.current.shift();
-        if (textToSpeak) {
-           await speakWithDefaultProvider(textToSpeak);
-        }
-      }
-
-      isProcessingRef.current = false;
-    };
-
     const initVision = async () => {
       try {
         const vision = await FilesetResolver.forVisionTasks(
@@ -258,60 +235,26 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
               startTrackingLoop();
             },
             onmessage: async (msg: LiveServerMessage) => {
-              const audioBase64 =
-                msg.serverContent?.modelTurn?.parts?.find((part: any) => !!part?.inlineData?.data)?.inlineData?.data;
-
               if (msg.serverContent?.outputTranscription) {
-                const delta = msg.serverContent?.outputTranscription?.text || '';
-                setTranscription(prev => (prev + " " + delta).slice(-150));
-                
-                // 1. Append delta to buffer
-                textBufferRef.current += delta;
-
-                // 2. Check for sentence endings in the buffer.
-                // We look for punctuation followed by a space, or potentially end of string if it looks complete
-                // But for streaming, usually punctuation + space is the safest "chunk" indicator.
-                // Regex: Match one or more characters that are NOT [.!?], followed by [.!?], followed by space or end of string.
-                // Actually, simpler: Split by sentence delimiters, keep the delimiters.
-                
-                // Let's iterate and extract all complete sentences.
-                let buffer = textBufferRef.current;
-                const sentenceRegex = /([^\.!\?]+[\.!\?]+)\s+/g;
-                let match;
-                let lastIndex = 0;
-
-                while ((match = sentenceRegex.exec(buffer)) !== null) {
-                  const sentence = match[1].trim();
-                  if (sentence) {
-                    processingQueueRef.current.push(sentence);
-                  }
-                  lastIndex = sentenceRegex.lastIndex;
-                }
-
-                // If we found sentences, remove them from the buffer
-                if (lastIndex > 0) {
-                  textBufferRef.current = buffer.substring(lastIndex);
-                  // Trigger processing
-                  processQueue();
-                }
+                setTranscription(prev => (prev + " " + msg.serverContent?.outputTranscription?.text).slice(-150));
               }
 
-              // Handle native audio if enabled (bypass buffer)
-              if (audioBase64 && ttsProviderRef.current === 'gemini-native') {
+              const audioBase64 =
+                msg.serverContent?.modelTurn?.parts?.find((part: any) => !!part?.inlineData?.data)?.inlineData?.data;
+              const cueText = getCueTextFromMessage(msg);
+
+              if (cueText && cueText !== latestCueRef.current) {
+                latestCueRef.current = cueText;
+                await speakWithDefaultProvider(cueText, audioBase64);
+              } else if (audioBase64 && ttsProviderRef.current === 'gemini-native') {
                 await playGeminiAudioChunk(audioBase64);
               }
 
               if (msg.serverContent?.interrupted) {
-                // Clear audio
                 sourcesRef.current.forEach(s => s.stop());
                 sourcesRef.current.clear();
                 nextStartTimeRef.current = 0;
                 latestCueRef.current = '';
-                
-                // Clear text buffers
-                textBufferRef.current = '';
-                processingQueueRef.current = [];
-                isProcessingRef.current = false;
               }
             },
             onerror: (e) => console.error("Live Error:", e),
