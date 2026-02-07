@@ -3,19 +3,6 @@ import { synthesizeSpeech } from '../services/elevenLabsService';
 import fs from 'fs';
 import path from 'path';
 
-// Mock stream class
-class MockTextStream implements AsyncIterable<string> {
-    private chunks = ["Hello,", " this is a", " test run.", " Checking prosody."];
-    
-    async *[Symbol.asyncIterator]() {
-        for (const chunk of this.chunks) {
-            console.log(`Sending chunk: "${chunk}"`);
-            yield chunk;
-            await new Promise(resolve => setTimeout(resolve, 500)); // Simulate delay
-        }
-    }
-}
-
 async function runTest() {
     console.log("Starting TTS WebSocket test...");
     
@@ -33,8 +20,7 @@ async function runTest() {
 
     try {
         console.log("Initializing synthesizeSpeech...");
-        const textStream = new MockTextStream();
-        const audioGenerator = synthesizeSpeech(textStream);
+        const audioGenerator = synthesizeSpeech("Hello, this is a test run. Checking prosody.");
 
         console.log("Consuming audio generator...");
         let chunkCount = 0;

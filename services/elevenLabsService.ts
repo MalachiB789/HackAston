@@ -1,5 +1,3 @@
-import { ElevenLabsClient } from 'elevenlabs';
-
 export interface ElevenLabsTtsError extends Error {
   code:
     | 'missing_api_key'
@@ -40,12 +38,26 @@ const createElevenLabsError = (
   return err;
 };
 
-import WebSocket from 'ws';
+const base64ToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
+const parseWsPayload = async (data: string | Blob | ArrayBuffer | ArrayBufferView): Promise<any> => {
+  if (typeof data === 'string') return JSON.parse(data);
+  if (data instanceof Blob) return JSON.parse(await data.text());
+  if (data instanceof ArrayBuffer) return JSON.parse(new TextDecoder().decode(data));
+  return JSON.parse(new TextDecoder().decode(data.buffer));
+};
 
 export const synthesizeSpeech = async function* (
-  textStream: AsyncIterable<string>,
+  text: string,
   options: SynthesizeSpeechOptions = {}
-): AsyncGenerator<Buffer> {
+): AsyncGenerator<Uint8Array> {
   const apiKey = process.env.ELEVEN_LABS_API_KEY;
   if (!apiKey) {
     throw createElevenLabsError(
@@ -54,104 +66,106 @@ export const synthesizeSpeech = async function* (
     );
   }
 
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw createElevenLabsError('Cannot synthesize empty text.', 'missing_text');
+  }
+
   const voiceId = options.voiceId || process.env.ELEVEN_LABS_VOICE_ID || DEFAULT_VOICE_ID;
   const modelId = options.modelId || DEFAULT_MODEL_ID;
-  const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream-input?model_id=${modelId}`;
+  const wsUrl = `wss://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream-input?model_id=${encodeURIComponent(
+    modelId
+  )}&output_format=mp3_44100_128`;
 
   const ws = new WebSocket(wsUrl);
 
-  // Promise to wait for the connection to open
-  await new Promise<void>((resolve, reject) => {
-    ws.on('open', () => resolve());
-    ws.on('error', (err) => reject(createElevenLabsError(`WebSocket connection failed: ${err.message}`, 'network_error')));
-  });
+  const queue: Uint8Array[] = [];
+  let error: ElevenLabsTtsError | null = null;
+  let isDone = false;
+  let wakeup: (() => void) | null = null;
 
-  // Send BOS message with API key and voice settings
-  const bosMessage = {
-    text: " ",
-    voice_settings: {
-      stability: 0.5,
-      similarity_boost: 0.8
-    },
-    xi_api_key: apiKey,
+  const notify = () => {
+    if (wakeup) {
+      wakeup();
+      wakeup = null;
+    }
   };
-  ws.send(JSON.stringify(bosMessage));
 
-  // Queue to store incoming audio chunks
-  const audioQueue: Buffer[] = [];
-  let error: Error | null = null;
-  let isClosed = false;
-  let resolveReadable: (() => void) | null = null;
+  const opened = new Promise<void>((resolve, reject) => {
+    ws.onopen = () => resolve();
+    ws.onerror = () => reject(createElevenLabsError('WebSocket connection failed.', 'network_error'));
+  });
 
-  ws.on('message', (data: WebSocket.Data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      if (message.audio) {
-        const chunk = Buffer.from(message.audio, 'base64');
-        audioQueue.push(chunk);
-        if (resolveReadable) {
-          resolveReadable();
-          resolveReadable = null;
+  ws.onmessage = (event: MessageEvent) => {
+    (async () => {
+      try {
+        const message = await parseWsPayload(event.data as any);
+
+        if (message.audio) {
+          queue.push(base64ToBytes(message.audio));
+          notify();
         }
-      }
-      if (message.isFinal) {
-        // Handle final message if needed, but usually we just wait for the stream to close or EOS
-      }
-      if (message.error) {
-        error = createElevenLabsError(`ElevenLabs WebSocket error: ${message.error}`, 'api_error');
-        if (resolveReadable) resolveReadable();
-      }
-    } catch (err) {
-      error = createElevenLabsError('Failed to parse incoming WebSocket message', 'invalid_response');
-      if (resolveReadable) resolveReadable();
-    }
-  });
 
-  ws.on('close', () => {
-    isClosed = true;
-    if (resolveReadable) resolveReadable();
-  });
+        if (message.error) {
+          error = createElevenLabsError(
+            `ElevenLabs WebSocket error: ${message.error?.message || message.error}`,
+            'api_error',
+            {
+              requestId: message.request_id,
+              details: typeof message.error === 'string' ? message.error : JSON.stringify(message.error),
+            }
+          );
+          notify();
+        }
 
-  ws.on('error', (err) => {
-    error = createElevenLabsError(`WebSocket error: ${err.message}`, 'network_error');
-    if (resolveReadable) resolveReadable();
-  });
-
-  // Start sending text chunks in the background
-  (async () => {
-    try {
-      for await (const chunk of textStream) {
-        if (isClosed || error) break;
-        ws.send(JSON.stringify({ text: chunk, try_trigger_generation: true }));
+        if (message.isFinal) {
+          isDone = true;
+          ws.close();
+          notify();
+        }
+      } catch {
+        error = createElevenLabsError('Failed to parse incoming WebSocket payload.', 'invalid_response');
+        notify();
       }
-      if (!isClosed && !error) {
-        ws.send(JSON.stringify({ text: "" })); // EOS message
-      }
-    } catch (err) {
-      // If the input stream fails, we should close the socket
-      ws.close();
-      error = createElevenLabsError(`Input text stream error: ${err instanceof Error ? err.message : String(err)}`, 'request_failed');
-    }
-  })();
+    })();
+  };
 
-  // Yield audio chunks as they arrive
+  ws.onclose = () => {
+    isDone = true;
+    notify();
+  };
+
+  try {
+    await opened;
+  } catch (err) {
+    throw (err instanceof Error
+      ? err
+      : createElevenLabsError('WebSocket connection failed.', 'network_error'));
+  }
+
+  ws.send(
+    JSON.stringify({
+      text: ' ',
+      xi_api_key: apiKey,
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.8,
+      },
+    })
+  );
+
+  ws.send(JSON.stringify({ text: trimmed, try_trigger_generation: true }));
+  ws.send(JSON.stringify({ text: '' }));
+
   while (true) {
-    if (audioQueue.length > 0) {
-      yield audioQueue.shift()!;
+    if (queue.length > 0) {
+      yield queue.shift()!;
       continue;
     }
-
-    if (error) {
-      throw error;
-    }
-
-    if (isClosed) {
-      break;
-    }
-
-    // Wait for the next chunk or event
-    await new Promise<void>((resolve) => {
-      resolveReadable = resolve;
+    if (error) throw error;
+    if (isDone) break;
+    await new Promise<void>(resolve => {
+      wakeup = resolve;
     });
   }
 };

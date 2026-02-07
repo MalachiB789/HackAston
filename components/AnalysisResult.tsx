@@ -1,6 +1,7 @@
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { AnalysisFeedback } from '../types';
+import { formatElevenLabsErrorForUi, synthesizeSpeech } from '../services/elevenLabsService';
 
 interface AnalysisResultProps {
   feedback: AnalysisFeedback;
@@ -8,10 +9,61 @@ interface AnalysisResultProps {
 }
 
 const AnalysisResult: React.FC<AnalysisResultProps> = ({ feedback, onReset }) => {
+  const [isReading, setIsReading] = useState(false);
+  const [readError, setReadError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-emerald-400';
     if (score >= 60) return 'text-amber-400';
     return 'text-rose-400';
+  };
+
+  const handleReadSummary = async () => {
+    if (isReading) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      setIsReading(false);
+      return;
+    }
+
+    setReadError(null);
+    setIsReading(true);
+    try {
+      const stream = synthesizeSpeech(feedback.overallSummary);
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+
+      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const bytes = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setIsReading(false);
+        audioRef.current = null;
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        setReadError('Unable to play generated audio.');
+        setIsReading(false);
+        audioRef.current = null;
+      };
+      await audio.play();
+    } catch (error) {
+      setReadError(formatElevenLabsErrorForUi(error));
+      setIsReading(false);
+    }
   };
 
   return (
@@ -34,6 +86,15 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ feedback, onReset }) =>
           <p className="text-zinc-300 leading-relaxed italic border-l-4 border-indigo-500 pl-4 py-2 bg-indigo-500/5 rounded-r-lg">
             "{feedback.overallSummary}"
           </p>
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={handleReadSummary}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+            >
+              {isReading ? 'Stop Read Aloud' : 'Read Aloud'}
+            </button>
+            {readError && <span className="text-rose-400 text-[10px] font-bold">{readError}</span>}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-800">
