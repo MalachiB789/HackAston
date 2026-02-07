@@ -6,6 +6,7 @@ import AnalysisResult from './components/AnalysisResult';
 import WorkoutBuilder from './components/WorkoutBuilder';
 import ActiveWorkoutSession from './components/ActiveWorkoutSession';
 import AISuggestionModal from './components/AISuggestionModal';
+import SolanaWalletPanel from './components/SolanaWalletPanel';
 import { analyzeForm } from './services/geminiService';
 import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog, WorkoutHistoryEntry, UserAccount } from './types';
 
@@ -501,6 +502,11 @@ const App: React.FC = () => {
                   ))}
                 </div>
               </div>
+
+              <SolanaWalletPanel 
+                currentUser={currentUser} 
+                onUpdateUser={(updates) => updateCurrentUserStats(a => ({ ...a, ...updates }))} 
+              />
 
               {routines.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center border-2 border-dashed border-zinc-900 rounded-3xl bg-zinc-900/20">

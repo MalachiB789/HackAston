@@ -60,4 +60,6 @@ export interface UserAccount {
   workoutsCompleted?: number;
   totalSetsCompleted?: number;
   bestFormScore?: number;
+  solanaWalletAddress?: string;
+  pendingSolanaRewards?: number;
 }
