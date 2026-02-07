@@ -26,6 +26,28 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
   const sessionRef = useRef<any>(null);
   const poseLandmarkerRef = useRef<PoseLandmarker | null>(null);
 
+  const drawOctopusFaceOverlay = (
+    ctx: CanvasRenderingContext2D,
+    landmarks: Array<{ x: number; y: number }>
+  ) => {
+    const nose = landmarks[0];
+    const leftEar = landmarks[7];
+    const rightEar = landmarks[8];
+    if (!nose || !leftEar || !rightEar) return;
+
+    const earDistance = Math.hypot((leftEar.x - rightEar.x) * ctx.canvas.width, (leftEar.y - rightEar.y) * ctx.canvas.height);
+    const size = Math.max(64, Math.min(190, earDistance * 2.1));
+    const centerX = nose.x * ctx.canvas.width;
+    const centerY = nose.y * ctx.canvas.height - size * 0.15;
+
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${Math.round(size)}px Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif`;
+    ctx.fillText("🐙", centerX, centerY);
+    ctx.restore();
+  };
+
   useEffect(() => {
     let stream: MediaStream | null = null;
     let frameInterval: number | null = null;
@@ -167,6 +189,8 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
             
             if (result.landmarks && result.landmarks.length > 0) {
               const landmarks = result.landmarks[0];
+
+              drawOctopusFaceOverlay(ctx, landmarks);
               
               let minX = 1, minY = 1, maxX = 0, maxY = 0;
               landmarks.forEach(lm => {
