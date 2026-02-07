@@ -39,15 +39,16 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
     ctx: CanvasRenderingContext2D,
     landmarks: Array<{ x: number; y: number }>
   ) => {
-    const nose = landmarks[0];
-    const leftEar = landmarks[7];
-    const rightEar = landmarks[8];
-    if (!nose || !leftEar || !rightEar) return;
+    // Use left shoulder landmark (index 11) for octopus placement
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    if (!leftShoulder || !rightShoulder) return;
 
-    const earDistance = Math.hypot((leftEar.x - rightEar.x) * ctx.canvas.width, (leftEar.y - rightEar.y) * ctx.canvas.height);
-    const size = Math.max(64, Math.min(190, earDistance * 2.1));
-    const centerX = nose.x * ctx.canvas.width;
-    const centerY = nose.y * ctx.canvas.height - size * 0.15;
+    // Size based on shoulder width
+    const shoulderDistance = Math.hypot((leftShoulder.x - rightShoulder.x) * ctx.canvas.width, (leftShoulder.y - rightShoulder.y) * ctx.canvas.height);
+    const size = Math.max(64, Math.min(190, shoulderDistance * 1.2));
+    const centerX = leftShoulder.x * ctx.canvas.width;
+    const centerY = leftShoulder.y * ctx.canvas.height - size * 0.2; // Slightly above shoulder
 
     ctx.save();
     ctx.textAlign = "center";
@@ -272,7 +273,7 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
                     }
                   }
                 }
-              }, 1200);
+              }, 400);
 
               startTrackingLoop();
             },
