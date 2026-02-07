@@ -45,19 +45,40 @@ export const connectWallet = async (): Promise<{ publicKey: string } | null> => 
 
 // treasury Keypair from environment variable
 // Expects VITE_TREASURY_PRIVATE_KEY to be a JSON array of numbers, e.g. "[123, 45, ...]"
+// HARDCODED KEY FOR DEMO PURPOSES ONLY - DO NOT USE IN PRODUCTION
+const DEMO_TREASURY_SECRET_KEY = [
+    71,243,123,59,118,71,159,70,162,82,92,186,122,131,231,29,
+    120,132,220,94,33,19,23,98,215,244,100,0,118,8,26,129,
+    242,89,230,45,11,72,64,62,100,225,177,52,210,4,32,115,
+    149,7,192,36,47,206,118,177,241,211,90,30,18,169,114,111
+];
+
 const getTreasuryKeypair = (): Keypair | null => {
+    // Try environment variable first
     const secretKeyString = import.meta.env.VITE_TREASURY_PRIVATE_KEY;
-    if (!secretKeyString) {
-        console.error("VITE_TREASURY_PRIVATE_KEY not set in .env.local");
-        return null; // Return null effectively disabling treasury features
+    
+    if (secretKeyString) {
+        try {
+            // Handle both JSON array and likely Base58 strings if we added that support
+            // For now, assuming JSON array or simple string
+            let secretKey;
+            if (secretKeyString.startsWith('[')) {
+                secretKey = Uint8Array.from(JSON.parse(secretKeyString));
+            } else {
+                 // Needs bs58 for base58 string, but for now we stick to JSON/Array format to avoid deps
+                 // or just fallback to the hardcoded one if parsing fails
+                 console.warn("VITE_TREASURY_PRIVATE_KEY format not recognized (expected JSON array), using demo key.");
+                 return Keypair.fromSecretKey(Uint8Array.from(DEMO_TREASURY_SECRET_KEY));
+            }
+            return Keypair.fromSecretKey(secretKey);
+        } catch (e) {
+            console.error("Invalid VITE_TREASURY_PRIVATE_KEY format", e);
+        }
     }
-    try {
-        const secretKey = Uint8Array.from(JSON.parse(secretKeyString));
-        return Keypair.fromSecretKey(secretKey);
-    } catch (e) {
-        console.error("Invalid Treasury Key format", e);
-        return null;
-    }
+
+    // Fallback to demo key
+    console.warn("Using DEMO_TREASURY_SECRET_KEY. This is insecure for production.");
+    return Keypair.fromSecretKey(Uint8Array.from(DEMO_TREASURY_SECRET_KEY));
 }
 
 
