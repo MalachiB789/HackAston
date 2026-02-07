@@ -41,7 +41,7 @@ const createElevenLabsError = (
 export const synthesizeSpeech = async (
   text: string,
   options: SynthesizeSpeechOptions = {}
-): Promise<ArrayBuffer> => { // Explicitly return Promise<ArrayBuffer>
+): Promise<any> => {
   const apiKey = process.env.ELEVEN_LABS_API_KEY;
   if (!apiKey) {
     throw createElevenLabsError(
@@ -64,29 +64,10 @@ export const synthesizeSpeech = async (
       text: trimmed,
       model_id: modelId,
       output_format: 'mp3_44100_128',
+      optimize_streaming_latency: 4,
     });
 
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of audioStream) {
-      chunks.push(chunk);
-    }
-
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const content = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      content.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    if (content.byteLength === 0) {
-      throw createElevenLabsError(
-        'ElevenLabs returned an empty audio response.',
-        'invalid_response'
-      );
-    }
-
-    return content.buffer;
+    return audioStream;
 
   } catch (error) {
     if ((error as any).statusCode) {

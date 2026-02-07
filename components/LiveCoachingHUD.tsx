@@ -138,9 +138,24 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
       }
 
       try {
-        const audioBytes = await synthesizeSpeech(cueText);
+        const audioStream = await synthesizeSpeech(cueText);
         if (isClosedRef.current) return;
-        const decoded = await decodeElevenLabsBuffer(audioBytes);
+
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of audioStream) {
+            if (isClosedRef.current) return;
+            chunks.push(chunk);
+        }
+
+        const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+        const audioBytes = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) {
+            audioBytes.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        const decoded = await decodeElevenLabsBuffer(audioBytes.buffer);
         if (isClosedRef.current) return;
         if (!decoded) throw new Error('Audio context is not available.');
         queueAudioBuffer(decoded);
