@@ -1,0 +1,8 @@
+{
+  "name": "Gym Buddy",
+  "description": "",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
