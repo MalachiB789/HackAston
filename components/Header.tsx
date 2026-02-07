@@ -23,7 +23,7 @@ const Header: React.FC<HeaderProps> = ({ currentUsername, currentPoints, onLogou
           </svg>
         </div>
         <h1 className="text-xl font-bold text-white tracking-tight">
-          GYM<span className="text-indigo-400">FORM</span> AI
+          GYM <span className="text-indigo-400">BUDDY</span>
         </h1>
       </div>
       <div className="flex items-center gap-4">
@@ -43,9 +43,6 @@ const Header: React.FC<HeaderProps> = ({ currentUsername, currentPoints, onLogou
             </button>
           </>
         )}
-        <span className="px-3 py-1 bg-zinc-800 text-zinc-400 rounded-full text-xs font-medium border border-zinc-700">
-          BETA 1.0
-        </span>
       </div>
     </header>
   );

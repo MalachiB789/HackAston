@@ -365,7 +365,7 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-6 space-y-6">
           <div>
-            <h1 className="text-2xl font-black text-white uppercase italic">GYMFORM AI</h1>
+            <h1 className="text-2xl font-black text-white uppercase italic">GYM BUDDY</h1>
             <p className="text-zinc-500 text-sm mt-1">Sign in to access collaborative features and your personal data.</p>
           </div>
 
@@ -770,11 +770,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <footer className="py-8 text-center border-t border-zinc-900">
-        <p className="text-zinc-600 text-[10px] font-bold uppercase tracking-[0.3em]">
-          BIO-PERFORMANCE INTELLIGENCE v3.0
-        </p>
-      </footer>
     </div>
   );
 };
