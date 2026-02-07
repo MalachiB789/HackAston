@@ -1,7 +1,13 @@
 
 import React from 'react';
 
-const Header: React.FC = () => {
+interface HeaderProps {
+  currentUsername?: string;
+  currentPoints?: number;
+  onLogout?: () => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ currentUsername, currentPoints, onLogout }) => {
   return (
     <header className="flex items-center justify-between px-6 py-4 bg-zinc-900 border-b border-zinc-800 sticky top-0 z-50">
       <div className="flex items-center gap-3">
@@ -21,6 +27,22 @@ const Header: React.FC = () => {
         </h1>
       </div>
       <div className="flex items-center gap-4">
+        {currentUsername && onLogout && (
+          <>
+            <span className="px-3 py-1 bg-indigo-500/10 text-indigo-300 rounded-full text-xs font-medium border border-indigo-500/30">
+              @{currentUsername}
+            </span>
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-300 rounded-full text-xs font-medium border border-emerald-500/30">
+              {currentPoints ?? 0} pts
+            </span>
+            <button
+              onClick={onLogout}
+              className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-full text-xs font-medium border border-zinc-700 transition-colors"
+            >
+              Logout
+            </button>
+          </>
+        )}
         <span className="px-3 py-1 bg-zinc-800 text-zinc-400 rounded-full text-xs font-medium border border-zinc-700">
           BETA 1.0
         </span>

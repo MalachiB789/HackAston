@@ -7,20 +7,23 @@ import WorkoutBuilder from './components/WorkoutBuilder';
 import ActiveWorkoutSession from './components/ActiveWorkoutSession';
 import AISuggestionModal from './components/AISuggestionModal';
 import { analyzeForm } from './services/geminiService';
-import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog, WorkoutHistoryEntry } from './types';
+import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog, WorkoutHistoryEntry, UserAccount } from './types';
 
 const App: React.FC = () => {
-  // Persistence
-  const [routines, setRoutines] = useState<WorkoutRoutine[]>(() => {
-    const saved = localStorage.getItem('gymform_routines');
+  const [accounts, setAccounts] = useState<UserAccount[]>(() => {
+    const saved = localStorage.getItem('gymform_accounts');
     return saved ? JSON.parse(saved) : [];
   });
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => localStorage.getItem('gymform_current_user'));
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
 
+  // User data
+  const [routines, setRoutines] = useState<WorkoutRoutine[]>([]);
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRoutine | null>(null);
-  const [workoutHistory, setWorkoutHistory] = useState<WorkoutHistoryEntry[]>(() => {
-    const saved = localStorage.getItem('gymform_history');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [workoutHistory, setWorkoutHistory] = useState<WorkoutHistoryEntry[]>([]);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [editingSplitGroupId, setEditingSplitGroupId] = useState<string | null>(null);
@@ -47,14 +50,150 @@ const App: React.FC = () => {
   const editingWorkout = editingRoutineId
     ? routines.find(r => r.id === editingRoutineId) || null
     : null;
+  const currentUser = currentUserId ? accounts.find(a => a.id === currentUserId) || null : null;
+  const leaderboard = [...accounts]
+    .map(account => ({
+      ...account,
+      points: account.points ?? 0,
+      workoutsCompleted: account.workoutsCompleted ?? 0,
+      totalSetsCompleted: account.totalSetsCompleted ?? 0,
+      bestFormScore: account.bestFormScore ?? 0,
+    }))
+    .sort((a, b) => {
+      if ((b.points ?? 0) !== (a.points ?? 0)) return (b.points ?? 0) - (a.points ?? 0);
+      return (b.workoutsCompleted ?? 0) - (a.workoutsCompleted ?? 0);
+    });
+  const currentUserRank = currentUser
+    ? leaderboard.findIndex(account => account.id === currentUser.id) + 1
+    : null;
 
   useEffect(() => {
-    localStorage.setItem('gymform_routines', JSON.stringify(routines));
-  }, [routines]);
+    localStorage.setItem('gymform_accounts', JSON.stringify(accounts));
+  }, [accounts]);
 
   useEffect(() => {
-    localStorage.setItem('gymform_history', JSON.stringify(workoutHistory));
-  }, [workoutHistory]);
+    if (currentUserId) localStorage.setItem('gymform_current_user', currentUserId);
+    else localStorage.removeItem('gymform_current_user');
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) {
+      setRoutines([]);
+      setWorkoutHistory([]);
+      return;
+    }
+
+    const savedRoutines = localStorage.getItem(`gymform_routines_${currentUserId}`);
+    const savedHistory = localStorage.getItem(`gymform_history_${currentUserId}`);
+    setRoutines(savedRoutines ? JSON.parse(savedRoutines) : []);
+    setWorkoutHistory(savedHistory ? JSON.parse(savedHistory) : []);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    localStorage.setItem(`gymform_routines_${currentUserId}`, JSON.stringify(routines));
+  }, [routines, currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    localStorage.setItem(`gymform_history_${currentUserId}`, JSON.stringify(workoutHistory));
+  }, [workoutHistory, currentUserId]);
+
+  const handleSignup = () => {
+    const username = authUsername.trim();
+    const password = authPassword.trim();
+    if (!username || !password) {
+      setAuthError('Username and password are required.');
+      return;
+    }
+    if (accounts.some(a => a.username.toLowerCase() === username.toLowerCase())) {
+      setAuthError('Username already exists.');
+      return;
+    }
+
+    const account: UserAccount = {
+      id: crypto.randomUUID(),
+      username,
+      password,
+      createdAt: Date.now(),
+      points: 0,
+      workoutsCompleted: 0,
+      totalSetsCompleted: 0,
+      bestFormScore: 0,
+    };
+    setAccounts(prev => [...prev, account]);
+    setCurrentUserId(account.id);
+    setAuthError(null);
+    setAuthUsername('');
+    setAuthPassword('');
+  };
+
+  const handleLogin = () => {
+    const username = authUsername.trim();
+    const password = authPassword.trim();
+    const account = accounts.find(
+      a => a.username.toLowerCase() === username.toLowerCase() && a.password === password
+    );
+    if (!account) {
+      setAuthError('Invalid username or password.');
+      return;
+    }
+    setCurrentUserId(account.id);
+    setAuthError(null);
+    setAuthUsername('');
+    setAuthPassword('');
+  };
+
+  const handleLogout = () => {
+    setCurrentUserId(null);
+    setActiveWorkout(null);
+    setIsBuilding(false);
+    setIsSuggesting(false);
+    setEditingRoutineId(null);
+    setEditingSplitGroupId(null);
+    setIsCoachingActive(null);
+    setFeedback(null);
+    setIsAnalyzingReport(false);
+    setError(null);
+  };
+
+  const updateCurrentUserStats = (
+    updater: (account: UserAccount) => UserAccount
+  ) => {
+    if (!currentUserId) return;
+    setAccounts(prev =>
+      prev.map(account => (account.id === currentUserId ? updater(account) : account))
+    );
+  };
+
+  const awardWorkoutPoints = (workout: WorkoutRoutine) => {
+    const sets = workout.exercises.flatMap(ex => ex.sets);
+    const totalSets = sets.length;
+    if (totalSets === 0) return;
+
+    const formScores = sets
+      .filter(set => typeof set.formScore === 'number')
+      .map(set => set.formScore as number);
+
+    const highFormBonus = formScores.reduce((acc, score) => {
+      if (score >= 90) return acc + 20;
+      if (score >= 80) return acc + 12;
+      if (score >= 70) return acc + 6;
+      return acc;
+    }, 0);
+
+    const consistencyBonus = totalSets >= 10 ? 20 : totalSets >= 6 ? 10 : 0;
+    const pointsEarned = 25 + totalSets * 5 + highFormBonus + consistencyBonus;
+    const bestFormInSession = formScores.length ? Math.max(...formScores) : undefined;
+
+    updateCurrentUserStats(account => ({
+      ...account,
+      points: (account.points ?? 0) + pointsEarned,
+      workoutsCompleted: (account.workoutsCompleted ?? 0) + 1,
+      totalSetsCompleted: (account.totalSetsCompleted ?? 0) + totalSets,
+      bestFormScore: Math.max(account.bestFormScore ?? 0, bestFormInSession ?? 0),
+    }));
+  };
 
   const handleCreateRoutine = (newRoutine: WorkoutRoutine | WorkoutRoutine[]) => {
     const toAdd = Array.isArray(newRoutine) ? newRoutine : [newRoutine];
@@ -217,12 +356,74 @@ const App: React.FC = () => {
     setRoutines(prev =>
       prev.map(r => (r.id === activeWorkout.id ? { ...r, lastPerformedAt: performedAt } : r))
     );
+    awardWorkoutPoints(activeWorkout);
     setActiveWorkout(null);
   };
 
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-6 space-y-6">
+          <div>
+            <h1 className="text-2xl font-black text-white uppercase italic">GYMFORM AI</h1>
+            <p className="text-zinc-500 text-sm mt-1">Sign in to access collaborative features and your personal data.</p>
+          </div>
+
+          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-1 w-fit">
+            <button
+              onClick={() => {
+                setAuthMode('login');
+                setAuthError(null);
+              }}
+              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-zinc-500'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => {
+                setAuthMode('signup');
+                setAuthError(null);
+              }}
+              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
+                authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-zinc-500'
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              value={authUsername}
+              onChange={e => setAuthUsername(e.target.value)}
+              placeholder="Username"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500"
+            />
+            <input
+              type="password"
+              value={authPassword}
+              onChange={e => setAuthPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500"
+            />
+            {authError && <p className="text-rose-400 text-xs font-bold">{authError}</p>}
+            <button
+              onClick={authMode === 'login' ? handleLogin : handleSignup}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all"
+            >
+              {authMode === 'login' ? 'Login' : 'Create Account'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-indigo-500/30 flex flex-col">
-      <Header />
+      <Header currentUsername={currentUser.username} currentPoints={currentUser.points ?? 0} onLogout={handleLogout} />
       
       <main className="flex-1 max-w-4xl mx-auto px-4 py-8 md:py-12 w-full">
         <div className="space-y-8">
@@ -264,6 +465,40 @@ const App: React.FC = () => {
                     </svg>
                     New Routine
                   </button>
+                </div>
+              </div>
+
+              <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-black text-amber-300 uppercase tracking-[0.3em]">Global Leaderboard</h3>
+                  {currentUserRank && (
+                    <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest">
+                      Your Rank: #{currentUserRank}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {leaderboard.slice(0, 8).map((account, index) => (
+                    <div
+                      key={account.id}
+                      className={`flex items-center justify-between rounded-xl px-3 py-2 border ${
+                        account.id === currentUser?.id
+                          ? 'bg-indigo-500/10 border-indigo-500/30'
+                          : 'bg-zinc-950 border-zinc-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="w-6 h-6 rounded-md bg-zinc-800 text-zinc-300 text-[10px] font-black flex items-center justify-center">
+                          {index + 1}
+                        </span>
+                        <span className="text-sm font-bold text-white">@{account.username}</span>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-emerald-300 text-xs font-black uppercase tracking-widest">{account.points} pts</p>
+                        <p className="text-zinc-500 text-[10px] uppercase tracking-widest">{account.workoutsCompleted} workouts</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 

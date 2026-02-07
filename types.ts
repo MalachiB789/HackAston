@@ -50,3 +50,14 @@ export interface WorkoutHistoryEntry {
   splitName?: string;
   exercises: WorkoutExercise[];
 }
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  password: string;
+  createdAt: number;
+  points?: number;
+  workoutsCompleted?: number;
+  totalSetsCompleted?: number;
+  bestFormScore?: number;
+}
