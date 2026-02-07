@@ -77,6 +77,11 @@ export const analyzeForm = async (
   frames: FrameData[],
   selectedExercise: string
 ): Promise<AnalysisFeedback> => {
+  // Optimize payload: Downsample to max 15 frames to reduce upload size and processing latency
+  const MAX_FRAMES = 15;
+  const samplingRate = Math.ceil(frames.length / MAX_FRAMES);
+  const sampledFrames = frames.filter((_, i) => i % samplingRate === 0).slice(0, MAX_FRAMES);
+
   const model = ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: [
@@ -84,12 +89,12 @@ export const analyzeForm = async (
         parts: [
           {
             text: `You are an expert biomechanics specialist and world-class powerlifting coach. 
-            Analyze this sequence of ${frames.length} frames showing a ${selectedExercise}. 
+            Analyze this sequence of ${sampledFrames.length} frames showing a ${selectedExercise}. 
             Identify the user's form errors, range of motion, and safety concerns.
             Provide detailed, constructive feedback in a structured JSON format.
             The score should be from 0 to 100.`
           },
-          ...frames.map(frame => ({
+          ...sampledFrames.map(frame => ({
             inlineData: {
               mimeType: "image/jpeg",
               data: frame.dataUrl.split(",")[1]

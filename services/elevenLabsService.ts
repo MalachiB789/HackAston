@@ -151,6 +151,9 @@ export const synthesizeSpeech = async function* (
         stability: 0.5,
         similarity_boost: 0.8,
       },
+      generation_config: {
+        chunk_length_schedule: [50, 50, 90, 120],
+      },
     })
   );
 
