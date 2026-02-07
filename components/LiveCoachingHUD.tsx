@@ -34,6 +34,7 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
   const latestCueRef = useRef<string>('');
   const hasMissingKeyNotificationRef = useRef<boolean>(false);
   const isClosedRef = useRef<boolean>(false);
+  const ttsStreamRef = useRef<TextInputStream | null>(null);
 
   const drawOctopusFaceOverlay = (
     ctx: CanvasRenderingContext2D,
@@ -67,6 +68,10 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
     const stopAudioAndSession = async () => {
       isClosedRef.current = true;
       if (sessionRef.current) sessionRef.current.close();
+      if (ttsStreamRef.current) {
+         ttsStreamRef.current.close();
+         ttsStreamRef.current = null;
+      }
       sourcesRef.current.forEach(s => s.stop());
       sourcesRef.current.clear();
       nextStartTimeRef.current = 0;
@@ -502,5 +507,38 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
     </div>
   );
 };
+
+class TextInputStream implements AsyncIterable<string> {
+  private queue: string[] = [];
+  private signal: ((val?: any) => void) | null = null;
+  private closed = false;
+
+  push(text: string) {
+    if (this.closed) return;
+    this.queue.push(text);
+    if (this.signal) {
+      this.signal();
+      this.signal = null;
+    }
+  }
+
+  close() {
+    this.closed = true;
+    if (this.signal) {
+      this.signal();
+      this.signal = null;
+    }
+  }
+
+  async *[Symbol.asyncIterator]() {
+    while (!this.closed || this.queue.length > 0) {
+      if (this.queue.length > 0) {
+        yield this.queue.shift()!;
+      } else {
+        await new Promise<void>(resolve => this.signal = resolve);
+      }
+    }
+  }
+}
 
 export default LiveCoachingHUD;
