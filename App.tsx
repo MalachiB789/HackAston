@@ -18,6 +18,7 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => localStorage.getItem('gymform_current_user'));
+  const [dataLoaded, setDataLoaded] = useState(false);
 
   // User data
   const [routines, setRoutines] = useState<WorkoutRoutine[]>([]);
@@ -80,6 +81,7 @@ const App: React.FC = () => {
     if (!currentUserId) {
       setRoutines([]);
       setWorkoutHistory([]);
+      setDataLoaded(false);
       return;
     }
 
@@ -87,17 +89,18 @@ const App: React.FC = () => {
     const savedHistory = localStorage.getItem(`gymform_history_${currentUserId}`);
     setRoutines(savedRoutines ? JSON.parse(savedRoutines) : []);
     setWorkoutHistory(savedHistory ? JSON.parse(savedHistory) : []);
+    setDataLoaded(true);
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !dataLoaded) return;
     localStorage.setItem(`gymform_routines_${currentUserId}`, JSON.stringify(routines));
-  }, [routines, currentUserId]);
+  }, [routines, currentUserId, dataLoaded]);
 
   useEffect(() => {
-    if (!currentUserId) return;
+    if (!currentUserId || !dataLoaded) return;
     localStorage.setItem(`gymform_history_${currentUserId}`, JSON.stringify(workoutHistory));
-  }, [workoutHistory, currentUserId]);
+  }, [workoutHistory, currentUserId, dataLoaded]);
 
   // Sync Auth0 user with local accounts
   useEffect(() => {
