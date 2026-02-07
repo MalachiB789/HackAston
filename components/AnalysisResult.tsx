@@ -107,13 +107,9 @@ const AnalysisResult: React.FC<AnalysisResultProps> = ({ feedback, onReset }) =>
 
       <button 
         onClick={onReset}
-        className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-2xl transition-all border border-zinc-700 flex items-center justify-center gap-2 group"
+        className="w-full py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-2xl transition-all border border-zinc-700 flex items-center justify-center"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 group-hover:rotate-180 transition-transform duration-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-          <path d="M3 3v5h5"/>
-        </svg>
-        New Recording
+        Done
       </button>
     </div>
   );

@@ -36,4 +36,8 @@ export interface WorkoutRoutine {
   name: string;
   exercises: WorkoutExercise[];
   lastPerformedAt?: number;
+  splitGroupId?: string;
+  splitName?: string;
+  dayIndex?: number;
+  generatedByAI?: boolean;
 }

@@ -5,14 +5,14 @@ import { WorkoutRoutine } from '../types';
 
 interface AISuggestionModalProps {
   history: WorkoutRoutine[];
-  onSave: (workout: WorkoutRoutine) => void;
+  onSave: (workouts: WorkoutRoutine[]) => void;
   onCancel: () => void;
 }
 
 const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, onCancel }) => {
   const [goal, setGoal] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [suggestion, setSuggestion] = useState<{ routine: WorkoutRoutine; reasoning: string } | null>(null);
+  const [suggestion, setSuggestion] = useState<{ routines: WorkoutRoutine[]; splitName: string; reasoning: string } | null>(null);
 
   const handleGenerate = async () => {
     if (!goal.trim()) return;
@@ -29,8 +29,8 @@ const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, 
   };
 
   return (
-    <div className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-zinc-900 w-full max-w-lg rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+    <div className="fixed inset-x-0 bottom-0 top-[72px] z-[150] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-zinc-900 w-full max-w-lg rounded-3xl border border-zinc-800 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[calc(100vh-104px)] flex flex-col">
         <div className="p-6 bg-gradient-to-br from-indigo-600/20 to-transparent border-b border-zinc-800">
           <div className="flex items-center gap-3 mb-2">
             <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
@@ -40,14 +40,14 @@ const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, 
             </div>
             <h2 className="text-xl font-black text-white uppercase italic tracking-wider">AI Training Assistant</h2>
           </div>
-          <p className="text-zinc-400 text-xs">I'll analyze your history and build a routine optimized for your goals.</p>
+          <p className="text-zinc-400 text-xs">I'll analyze your history and build a full split optimized for your goals.</p>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 overflow-y-auto">
           {!suggestion ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">What's your focus for today?</label>
+                <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">What's your training goal?</label>
                 <textarea 
                   value={goal}
                   onChange={e => setGoal(e.target.value)}
@@ -63,10 +63,10 @@ const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, 
                 {isGenerating ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                    Analyzing Bio-Data...
+                    Building Split...
                   </>
                 ) : (
-                  'Generate Smart Routine'
+                  'Generate AI Split'
                 )}
               </button>
             </div>
@@ -83,12 +83,19 @@ const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, 
               </div>
 
               <div className="space-y-3">
-                <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Suggested Plan</h4>
+                <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">My Routines: {suggestion.splitName}</h4>
                 <div className="space-y-2">
-                  {suggestion.routine.exercises.map((ex, i) => (
-                    <div key={ex.id} className="flex items-center gap-3 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
-                      <span className="text-indigo-500 font-mono text-[10px] font-bold">{i+1}</span>
-                      <span className="text-white font-bold text-sm">{ex.type}</span>
+                  {suggestion.routines.map((routine, dayIdx) => (
+                    <div key={routine.id} className="bg-zinc-950 p-3 rounded-lg border border-zinc-800 space-y-2">
+                      <p className="text-indigo-400 text-[10px] font-black uppercase tracking-widest">
+                        Day {dayIdx + 1}: {routine.name}
+                      </p>
+                      {routine.exercises.map((ex, i) => (
+                        <div key={ex.id} className="flex items-center gap-3">
+                          <span className="text-indigo-500 font-mono text-[10px] font-bold">{i + 1}</span>
+                          <span className="text-white font-bold text-sm">{ex.type}</span>
+                        </div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -97,10 +104,10 @@ const AISuggestionModal: React.FC<AISuggestionModalProps> = ({ history, onSave, 
               <div className="flex gap-3">
                 <button onClick={() => setSuggestion(null)} className="flex-1 py-3 text-zinc-500 font-black text-[10px] uppercase tracking-widest hover:text-white">Start Over</button>
                 <button 
-                  onClick={() => onSave(suggestion.routine)}
+                  onClick={() => onSave(suggestion.routines)}
                   className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-xl uppercase tracking-widest text-[10px] shadow-lg shadow-emerald-500/20"
                 >
-                  Accept & Save
+                  Accept Split
                 </button>
               </div>
             </div>

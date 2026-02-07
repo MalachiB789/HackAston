@@ -19,19 +19,76 @@ const App: React.FC = () => {
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRoutine | null>(null);
   const [isBuilding, setIsBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
+  const [editingSplitGroupId, setEditingSplitGroupId] = useState<string | null>(null);
+  const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [isCoachingActive, setIsCoachingActive] = useState<{ exId: string, type: ExerciseType } | null>(null);
   const [feedback, setFeedback] = useState<AnalysisFeedback | null>(null);
   const [isAnalyzingReport, setIsAnalyzingReport] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sortedRoutines = [...routines].sort((a, b) => (b.lastPerformedAt ?? 0) - (a.lastPerformedAt ?? 0));
+  const mySplitRoutines = sortedRoutines
+    .filter(r => !!r.splitGroupId)
+    .sort((a, b) => (a.dayIndex ?? 999) - (b.dayIndex ?? 999));
+  const manualRoutines = sortedRoutines.filter(r => !r.splitGroupId);
+  const historyRoutines = sortedRoutines.filter(
+    r => !!r.lastPerformedAt && r.exercises.some(ex => ex.sets.length > 0)
+  );
+  const splitGroups = mySplitRoutines.reduce<Record<string, WorkoutRoutine[]>>((acc, routine) => {
+    const groupId = routine.splitGroupId!;
+    if (!acc[groupId]) acc[groupId] = [];
+    acc[groupId].push(routine);
+    return acc;
+  }, {});
+  const editingSplitRoutines = editingSplitGroupId
+    ? (splitGroups[editingSplitGroupId] || []).sort((a, b) => (a.dayIndex ?? 999) - (b.dayIndex ?? 999))
+    : [];
+  const editingWorkout = editingRoutineId
+    ? routines.find(r => r.id === editingRoutineId) || null
+    : null;
 
   useEffect(() => {
     localStorage.setItem('gymform_routines', JSON.stringify(routines));
   }, [routines]);
 
-  const handleCreateRoutine = (newRoutine: WorkoutRoutine) => {
-    setRoutines([...routines, newRoutine]);
+  const handleCreateRoutine = (newRoutine: WorkoutRoutine | WorkoutRoutine[]) => {
+    const toAdd = Array.isArray(newRoutine) ? newRoutine : [newRoutine];
+    setRoutines(prev => {
+      if (editingRoutineId) {
+        return prev.map(r => (r.id === editingRoutineId ? toAdd[0] : r));
+      }
+      if (!editingSplitGroupId) return [...prev, ...toAdd];
+      const remaining = prev.filter(r => r.splitGroupId !== editingSplitGroupId);
+      return [...remaining, ...toAdd];
+    });
     setIsBuilding(false);
     setIsSuggesting(false);
+    setEditingSplitGroupId(null);
+    setEditingRoutineId(null);
+  };
+
+  const handleStartSplitEdit = (splitGroupId: string) => {
+    setEditingSplitGroupId(splitGroupId);
+    setEditingRoutineId(null);
+    setIsBuilding(true);
+    setIsSuggesting(false);
+  };
+
+  const handleStartWorkoutEdit = (routineId: string) => {
+    setEditingRoutineId(routineId);
+    setEditingSplitGroupId(null);
+    setIsBuilding(true);
+    setIsSuggesting(false);
+  };
+
+  const handleDeleteSplit = (splitGroupId: string) => {
+    setRoutines(prev => prev.filter(r => r.splitGroupId !== splitGroupId));
+    if (editingSplitGroupId === splitGroupId) {
+      setEditingSplitGroupId(null);
+      setIsBuilding(false);
+    }
+    if (activeWorkout?.splitGroupId === splitGroupId) {
+      setActiveWorkout(null);
+    }
   };
 
   const deleteRoutine = (id: string) => {
@@ -45,6 +102,38 @@ const App: React.FC = () => {
       exercises: activeWorkout.exercises.map(ex => 
         ex.id === exerciseId ? { ...ex, sets: [...ex.sets, set] } : ex
       )
+    };
+    setActiveWorkout(updated);
+  };
+
+  const handleUpdateSet = (exerciseId: string, setId: string, updates: Pick<SetLog, 'weight' | 'reps'>) => {
+    if (!activeWorkout) return;
+    const updated: WorkoutRoutine = {
+      ...activeWorkout,
+      exercises: activeWorkout.exercises.map(ex =>
+        ex.id === exerciseId
+          ? {
+              ...ex,
+              sets: ex.sets.map(s => (s.id === setId ? { ...s, ...updates } : s)),
+            }
+          : ex
+      ),
+    };
+    setActiveWorkout(updated);
+  };
+
+  const handleDeleteSet = (exerciseId: string, setId: string) => {
+    if (!activeWorkout) return;
+    const updated: WorkoutRoutine = {
+      ...activeWorkout,
+      exercises: activeWorkout.exercises.map(ex =>
+        ex.id === exerciseId
+          ? {
+              ...ex,
+              sets: ex.sets.filter(s => s.id !== setId),
+            }
+          : ex
+      ),
     };
     setActiveWorkout(updated);
   };
@@ -83,6 +172,21 @@ const App: React.FC = () => {
     }
   };
 
+  const handleFinishWorkoutSession = () => {
+    if (!activeWorkout) return;
+
+    const completedWorkout: WorkoutRoutine = {
+      ...activeWorkout,
+      lastPerformedAt: Date.now(),
+    };
+
+    setRoutines(prev => {
+      const remaining = prev.filter(r => r.id !== completedWorkout.id);
+      return [completedWorkout, ...remaining];
+    });
+    setActiveWorkout(null);
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-indigo-500/30 flex flex-col">
       <Header />
@@ -102,7 +206,11 @@ const App: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <button 
-                    onClick={() => setIsSuggesting(true)}
+                    onClick={() => {
+                      setEditingSplitGroupId(null);
+                      setEditingRoutineId(null);
+                      setIsSuggesting(true);
+                    }}
                     className="px-4 py-3 bg-zinc-900 hover:bg-zinc-800 border border-indigo-500/30 text-indigo-400 font-black rounded-xl uppercase tracking-widest text-[10px] flex items-center gap-2 shadow-lg transition-all"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -111,7 +219,11 @@ const App: React.FC = () => {
                     AI Suggest
                   </button>
                   <button 
-                    onClick={() => setIsBuilding(true)}
+                    onClick={() => {
+                      setEditingSplitGroupId(null);
+                      setEditingRoutineId(null);
+                      setIsBuilding(true);
+                    }}
                     className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs flex items-center gap-2 shadow-lg transition-all"
                   >
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -128,30 +240,156 @@ const App: React.FC = () => {
                   <button onClick={() => setIsBuilding(true)} className="text-indigo-400 font-black text-sm hover:underline uppercase tracking-widest">Create your first workout</button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {routines.map(routine => (
-                    <div key={routine.id} className="group bg-zinc-900 rounded-2xl p-6 border border-zinc-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between h-44">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h3 className="text-xl font-black text-white">{routine.name}</h3>
-                          <p className="text-zinc-500 text-xs font-bold mt-1 uppercase tracking-tighter">
-                            {routine.exercises.length} Exercises
-                          </p>
-                        </div>
-                        <button onClick={() => deleteRoutine(routine.id)} className="opacity-0 group-hover:opacity-100 p-2 text-zinc-600 hover:text-rose-500 transition-all">
-                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                           </svg>
-                        </button>
+                <div className="space-y-8">
+                  {mySplitRoutines.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-indigo-400 uppercase tracking-[0.3em]">My Routines</h3>
+                      <div className="space-y-6">
+                        {Object.entries(splitGroups).map(([groupId, routines]) => {
+                          const orderedRoutines = [...routines].sort((a, b) => (a.dayIndex ?? 999) - (b.dayIndex ?? 999));
+                          const title = orderedRoutines[0]?.splitName || 'My Split';
+                          return (
+                            <div key={groupId} className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] text-indigo-300 font-black uppercase tracking-[0.3em]">{title}</p>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => handleStartSplitEdit(groupId)}
+                                    className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30"
+                                  >
+                                    Edit Split
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteSplit(groupId)}
+                                    className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-rose-600/20 text-rose-300 hover:bg-rose-600/30"
+                                  >
+                                    Delete Split
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {orderedRoutines.map(routine => (
+                                  <div key={routine.id} className="group bg-zinc-900 rounded-2xl p-6 border border-indigo-500/30 hover:border-indigo-400/60 transition-all flex flex-col justify-between h-44">
+                                    <div className="flex justify-between items-start">
+                                      <div>
+                                        <p className="text-[10px] text-indigo-400 font-black uppercase tracking-widest">{routine.splitName || 'My Split'}</p>
+                                        <h3 className="text-xl font-black text-white">{routine.name}</h3>
+                                        <p className="text-zinc-500 text-xs font-bold mt-1 uppercase tracking-tighter">
+                                          {routine.exercises.length} Exercises
+                                        </p>
+                                      </div>
+                                      <button onClick={() => deleteRoutine(routine.id)} className="opacity-0 group-hover:opacity-100 p-2 text-zinc-600 hover:text-rose-500 transition-all">
+                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                    <button
+                                      onClick={() => setActiveWorkout(routine)}
+                                      className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-[10px] transition-all"
+                                    >
+                                      Start Session
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                      <button 
-                        onClick={() => setActiveWorkout(routine)}
-                        className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-[10px] transition-all"
-                      >
-                        Start Session
-                      </button>
                     </div>
-                  ))}
+                  )}
+
+                  {manualRoutines.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em]">Other Workouts</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {manualRoutines.map(routine => (
+                          <div key={routine.id} className="group bg-zinc-900 rounded-2xl p-6 border border-zinc-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between h-44">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h3 className="text-xl font-black text-white">{routine.name}</h3>
+                                <p className="text-zinc-500 text-xs font-bold mt-1 uppercase tracking-tighter">
+                                  {routine.exercises.length} Exercises
+                                </p>
+                              </div>
+                              <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+                                <button
+                                  onClick={() => handleStartWorkoutEdit(routine.id)}
+                                  className="p-2 text-zinc-400 hover:text-indigo-300 transition-all"
+                                  title="Edit workout"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.586-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.414-8.586z" />
+                                  </svg>
+                                </button>
+                                <button onClick={() => deleteRoutine(routine.id)} className="p-2 text-zinc-600 hover:text-rose-500 transition-all">
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setActiveWorkout(routine)}
+                              className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-[10px] transition-all"
+                            >
+                              Start Session
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {historyRoutines.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em]">Workout History</h3>
+                      <div className="space-y-2">
+                        {historyRoutines.slice(0, 10).map(routine => {
+                          const totalSets = routine.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
+                          const avgScoreRaw = routine.exercises
+                            .flatMap(ex => ex.sets)
+                            .filter(set => typeof set.formScore === 'number')
+                            .map(set => set.formScore as number);
+                          const avgScore = avgScoreRaw.length
+                            ? Math.round(avgScoreRaw.reduce((a, b) => a + b, 0) / avgScoreRaw.length)
+                            : null;
+
+                          return (
+                            <div key={`${routine.id}-history`} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between">
+                              <div className="flex-1">
+                                <p className="text-white font-bold">{routine.name}</p>
+                                <p className="text-zinc-500 text-xs">
+                                  {new Date(routine.lastPerformedAt!).toLocaleString()}
+                                </p>
+                                <div className="mt-3 space-y-2">
+                                  {routine.exercises.filter(ex => ex.sets.length > 0).map(ex => (
+                                    <div key={`${routine.id}-${ex.id}`} className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-2">
+                                      <p className="text-zinc-300 text-[10px] font-black uppercase tracking-widest mb-1">{ex.type}</p>
+                                      <div className="flex flex-wrap gap-1">
+                                        {ex.sets.map((set, idx) => (
+                                          <span key={set.id} className="px-2 py-1 rounded-md bg-zinc-900 text-zinc-200 text-[10px] font-bold">
+                                            {idx + 1}: {set.weight}kg x {set.reps}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="text-right ml-4 self-start">
+                                <p className="text-zinc-300 text-xs font-bold uppercase tracking-widest">{totalSets} sets</p>
+                                {avgScore !== null && (
+                                  <p className="text-emerald-400 text-xs font-bold uppercase tracking-widest">Avg AI Score: {avgScore}</p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
@@ -160,8 +398,14 @@ const App: React.FC = () => {
           {/* Builder View */}
           {isBuilding && (
             <WorkoutBuilder 
+              initialSplit={editingSplitRoutines}
+              initialWorkout={editingWorkout}
               onSave={handleCreateRoutine} 
-              onCancel={() => setIsBuilding(false)} 
+              onCancel={() => {
+                setIsBuilding(false);
+                setEditingSplitGroupId(null);
+                setEditingRoutineId(null);
+              }} 
             />
           )}
 
@@ -179,8 +423,10 @@ const App: React.FC = () => {
             <ActiveWorkoutSession 
               workout={activeWorkout}
               onLogSet={handleLogSet}
+              onUpdateSet={handleUpdateSet}
+              onDeleteSet={handleDeleteSet}
               onLaunchCoach={(exId, type) => setIsCoachingActive({ exId, type })}
-              onFinish={() => setActiveWorkout(null)}
+              onFinish={handleFinishWorkoutSession}
             />
           )}
 

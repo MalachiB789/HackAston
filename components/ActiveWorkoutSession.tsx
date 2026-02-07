@@ -5,14 +5,19 @@ import { WorkoutRoutine, SetLog, ExerciseType } from '../types';
 interface ActiveWorkoutSessionProps {
   workout: WorkoutRoutine;
   onLogSet: (exerciseId: string, set: SetLog) => void;
+  onUpdateSet: (exerciseId: string, setId: string, updates: Pick<SetLog, 'weight' | 'reps'>) => void;
+  onDeleteSet: (exerciseId: string, setId: string) => void;
   onLaunchCoach: (exerciseId: string, type: ExerciseType) => void;
   onFinish: () => void;
 }
 
-const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, onLogSet, onLaunchCoach, onFinish }) => {
+const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, onLogSet, onUpdateSet, onDeleteSet, onLaunchCoach, onFinish }) => {
   const [activeExerciseIdx, setActiveExerciseIdx] = useState(0);
   const [weight, setWeight] = useState(0);
   const [reps, setReps] = useState(0);
+  const [editingSetId, setEditingSetId] = useState<string | null>(null);
+  const [editingWeight, setEditingWeight] = useState(0);
+  const [editingReps, setEditingReps] = useState(0);
 
   const activeExercise = workout.exercises[activeExerciseIdx];
 
@@ -25,6 +30,22 @@ const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, on
       timestamp: Date.now()
     });
     setReps(0);
+  };
+
+  const startEditingSet = (set: SetLog) => {
+    setEditingSetId(set.id);
+    setEditingWeight(set.weight);
+    setEditingReps(set.reps);
+  };
+
+  const cancelEditingSet = () => {
+    setEditingSetId(null);
+  };
+
+  const saveEditingSet = () => {
+    if (!editingSetId || editingReps <= 0) return;
+    onUpdateSet(activeExercise.id, editingSetId, { weight: editingWeight, reps: editingReps });
+    setEditingSetId(null);
   };
 
   return (
@@ -107,15 +128,75 @@ const ActiveWorkoutSession: React.FC<ActiveWorkoutSessionProps> = ({ workout, on
               ) : (
                 activeExercise.sets.map((set, i) => (
                   <div key={set.id} className="flex items-center justify-between bg-zinc-950/50 p-3 rounded-xl border border-zinc-800/50 group animate-in slide-in-from-right-4 duration-300">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 flex-1">
                       <div className="w-6 h-6 bg-zinc-800 rounded flex items-center justify-center text-[10px] font-bold text-zinc-500">{i + 1}</div>
-                      <span className="text-white font-bold">{set.weight}kg <span className="text-zinc-500 text-xs px-2">×</span> {set.reps} reps</span>
+                      {editingSetId === set.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={editingWeight}
+                            onChange={e => setEditingWeight(Number(e.target.value))}
+                            className="w-24 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white"
+                          />
+                          <span className="text-zinc-500 text-xs">kg ×</span>
+                          <input
+                            type="number"
+                            value={editingReps}
+                            onChange={e => setEditingReps(Number(e.target.value))}
+                            className="w-20 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-sm text-white"
+                          />
+                          <span className="text-zinc-500 text-xs">reps</span>
+                        </div>
+                      ) : (
+                        <span className="text-white font-bold">{set.weight}kg <span className="text-zinc-500 text-xs px-2">×</span> {set.reps} reps</span>
+                      )}
                     </div>
-                    {set.formScore && (
-                      <div className="flex items-center gap-2 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
-                         <span className="text-emerald-500 font-bold text-[10px]">AI Score: {set.formScore}</span>
-                      </div>
-                    )}
+
+                    <div className="flex items-center gap-2">
+                      {set.formScore && (
+                        <div className="flex items-center gap-2 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20">
+                           <span className="text-emerald-500 font-bold text-[10px]">AI Score: {set.formScore}</span>
+                        </div>
+                      )}
+
+                      {editingSetId === set.id ? (
+                        <>
+                          <button
+                            onClick={saveEditingSet}
+                            className="px-2 py-1 rounded-md bg-emerald-600/20 text-emerald-300 text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditingSet}
+                            className="px-2 py-1 rounded-md bg-zinc-700 text-zinc-200 text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startEditingSet(set)}
+                            className="p-1.5 text-zinc-400 hover:text-indigo-300 transition-all"
+                            title="Edit set"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.586-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.414-8.586z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => onDeleteSet(activeExercise.id, set.id)}
+                            className="p-1.5 text-zinc-500 hover:text-rose-500 transition-all"
+                            title="Delete set"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
