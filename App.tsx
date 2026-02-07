@@ -103,25 +103,35 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated && user && user.sub) {
       const userId = user.sub;
-      setAccounts(prev => {
-        if (prev.some(a => a.id === userId)) return prev;
-        // Create new local account for Auth0 user if not exists
-        return [...prev, {
+      const userEmail = user.email;
+
+      const existingAccount = accounts.find(a => 
+        a.id === userId || (userEmail && (a as any).email === userEmail)
+      );
+
+      if (existingAccount) {
+        if (currentUserId !== existingAccount.id) {
+          setCurrentUserId(existingAccount.id);
+        }
+        if (userEmail && !(existingAccount as any).email) {
+          setAccounts(prev => prev.map(a => a.id === existingAccount.id ? { ...a, email: userEmail } : a) as UserAccount[]);
+        }
+      } else {
+        setAccounts(prev => [...prev, {
           id: userId,
           username: user.nickname || user.name || user.email || 'User',
+          email: userEmail,
           password: '', // Not used with Auth0
           createdAt: Date.now(),
           points: 0,
           workoutsCompleted: 0,
           totalSetsCompleted: 0,
           bestFormScore: 0,
-        }];
-      });
-      if (currentUserId !== userId) {
+        } as any as UserAccount]);
         setCurrentUserId(userId);
       }
     }
-  }, [isAuthenticated, user, currentUserId]);
+  }, [isAuthenticated, user, currentUserId, accounts]);
 
   const handleLogout = () => {
     logout({ logoutParams: { returnTo: window.location.origin } });
