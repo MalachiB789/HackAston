@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import Header from './components/Header';
 import LiveCoachingHUD from './components/LiveCoachingHUD';
 import AnalysisResult from './components/AnalysisResult';
@@ -11,15 +12,12 @@ import { analyzeForm } from './services/geminiService';
 import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog, WorkoutHistoryEntry, UserAccount } from './types';
 
 const App: React.FC = () => {
+  const { user, isAuthenticated, isLoading, loginWithRedirect, logout } = useAuth0();
   const [accounts, setAccounts] = useState<UserAccount[]>(() => {
     const saved = localStorage.getItem('gymform_accounts');
     return saved ? JSON.parse(saved) : [];
   });
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => localStorage.getItem('gymform_current_user'));
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
-  const [authUsername, setAuthUsername] = useState('');
-  const [authPassword, setAuthPassword] = useState('');
-  const [authError, setAuthError] = useState<string | null>(null);
 
   // User data
   const [routines, setRoutines] = useState<WorkoutRoutine[]>([]);
@@ -100,52 +98,32 @@ const App: React.FC = () => {
     localStorage.setItem(`gymform_history_${currentUserId}`, JSON.stringify(workoutHistory));
   }, [workoutHistory, currentUserId]);
 
-  const handleSignup = () => {
-    const username = authUsername.trim();
-    const password = authPassword.trim();
-    if (!username || !password) {
-      setAuthError('Username and password are required.');
-      return;
+  // Sync Auth0 user with local accounts
+  useEffect(() => {
+    if (isAuthenticated && user && user.sub) {
+      const userId = user.sub;
+      setAccounts(prev => {
+        if (prev.some(a => a.id === userId)) return prev;
+        // Create new local account for Auth0 user if not exists
+        return [...prev, {
+          id: userId,
+          username: user.nickname || user.name || user.email || 'User',
+          password: '', // Not used with Auth0
+          createdAt: Date.now(),
+          points: 0,
+          workoutsCompleted: 0,
+          totalSetsCompleted: 0,
+          bestFormScore: 0,
+        }];
+      });
+      if (currentUserId !== userId) {
+        setCurrentUserId(userId);
+      }
     }
-    if (accounts.some(a => a.username.toLowerCase() === username.toLowerCase())) {
-      setAuthError('Username already exists.');
-      return;
-    }
-
-    const account: UserAccount = {
-      id: crypto.randomUUID(),
-      username,
-      password,
-      createdAt: Date.now(),
-      points: 0,
-      workoutsCompleted: 0,
-      totalSetsCompleted: 0,
-      bestFormScore: 0,
-    };
-    setAccounts(prev => [...prev, account]);
-    setCurrentUserId(account.id);
-    setAuthError(null);
-    setAuthUsername('');
-    setAuthPassword('');
-  };
-
-  const handleLogin = () => {
-    const username = authUsername.trim();
-    const password = authPassword.trim();
-    const account = accounts.find(
-      a => a.username.toLowerCase() === username.toLowerCase() && a.password === password
-    );
-    if (!account) {
-      setAuthError('Invalid username or password.');
-      return;
-    }
-    setCurrentUserId(account.id);
-    setAuthError(null);
-    setAuthUsername('');
-    setAuthPassword('');
-  };
+  }, [isAuthenticated, user, currentUserId]);
 
   const handleLogout = () => {
+    logout({ logoutParams: { returnTo: window.location.origin } });
     setCurrentUserId(null);
     setActiveWorkout(null);
     setIsBuilding(false);
@@ -361,7 +339,18 @@ const App: React.FC = () => {
     setActiveWorkout(null);
   };
 
-  if (!currentUser) {
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center">
+          <div className="h-4 w-4 bg-indigo-500 rounded-full mb-2"></div>
+          <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Loading Auth0...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-6 space-y-6">
@@ -370,53 +359,31 @@ const App: React.FC = () => {
             <p className="text-zinc-500 text-sm mt-1">Sign in to access collaborative features and your personal data.</p>
           </div>
 
-          <div className="flex items-center gap-2 bg-zinc-950 border border-zinc-800 rounded-xl p-1 w-fit">
+          <div className="space-y-3">
             <button
-              onClick={() => {
-                setAuthMode('login');
-                setAuthError(null);
-              }}
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                authMode === 'login' ? 'bg-indigo-600 text-white' : 'text-zinc-500'
-              }`}
+              onClick={() => loginWithRedirect()}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all"
             >
               Login
             </button>
             <button
-              onClick={() => {
-                setAuthMode('signup');
-                setAuthError(null);
-              }}
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest ${
-                authMode === 'signup' ? 'bg-indigo-600 text-white' : 'text-zinc-500'
-              }`}
+              onClick={() => loginWithRedirect({ authorizationParams: { screen_hint: 'signup' } })}
+              className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all"
             >
               Sign Up
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
 
-          <div className="space-y-3">
-            <input
-              value={authUsername}
-              onChange={e => setAuthUsername(e.target.value)}
-              placeholder="Username"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500"
-            />
-            <input
-              type="password"
-              value={authPassword}
-              onChange={e => setAuthPassword(e.target.value)}
-              placeholder="Password"
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-indigo-500"
-            />
-            {authError && <p className="text-rose-400 text-xs font-bold">{authError}</p>}
-            <button
-              onClick={authMode === 'login' ? handleLogin : handleSignup}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all"
-            >
-              {authMode === 'login' ? 'Login' : 'Create Account'}
-            </button>
-          </div>
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center">
+          <div className="h-4 w-4 bg-emerald-500 rounded-full mb-2"></div>
+          <p className="text-xs font-black uppercase tracking-widest text-zinc-500">Setting up profile...</p>
         </div>
       </div>
     );
