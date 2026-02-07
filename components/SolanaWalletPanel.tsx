@@ -6,9 +6,10 @@ import { connectWallet, convertPointsToSol, distributeRevenue, getWalletBalance,
 interface SolanaWalletPanelProps {
   currentUser: UserAccount;
   onUpdateUser: (updatedFields: Partial<UserAccount>) => void;
+  onClose?: () => void;
 }
 
-const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUpdateUser }) => {
+const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUpdateUser, onClose }) => {
   const [balance, setBalance] = useState<number | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
@@ -30,16 +31,18 @@ const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUp
     setIsConnecting(true);
     setStatusMsg(null);
     try {
+      console.log("Attempting to connect wallet...");
       const wallet = await connectWallet();
+      console.log("Wallet connection result:", wallet);
       if (wallet) {
         onUpdateUser({ solanaWalletAddress: wallet.publicKey });
         setStatusMsg("Wallet connected!");
       } else {
-        setStatusMsg("Wallet connection failed or rejected.");
+        setStatusMsg("Connection rejected or failed. Check console popup.");
       }
-    } catch (e) {
-      console.error(e);
-      setStatusMsg("Error connecting wallet.");
+    } catch (e: any) {
+      console.error("Wallet connection error:", e);
+      setStatusMsg(`Error: ${e.message || "Unknown error"}`);
     } finally {
       setIsConnecting(false);
     }
@@ -95,7 +98,12 @@ const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUp
 
   if (!hasPhantom) {
       return (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center max-w-md mx-auto mt-20">
+               {onClose && (
+                  <div className="flex justify-end mb-4">
+                      <button onClick={onClose} className="text-zinc-500 hover:text-white">✕</button>
+                  </div>
+              )}
               <p className="text-zinc-400 text-sm mb-4">Solana Wallet not found.</p>
               <a href="https://phantom.app/" target="_blank" rel="noreferrer" className="text-indigo-400 font-bold hover:underline">Install Phantom Wallet</a>
           </div>
@@ -103,30 +111,53 @@ const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUp
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+    <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4 max-w-lg mx-auto mt-10 shadow-2xl">
       <div className="flex items-center justify-between">
-          <h3 className="text-xs font-black text-purple-400 uppercase tracking-[0.3em]">Crypto Rewards</h3>
-          <div className="px-2 py-1 bg-purple-500/10 rounded-md border border-purple-500/20">
-              <span className="text-[10px] font-bold text-purple-300">DEVNET</span>
+          <div className="flex items-center gap-3">
+            <h3 className="text-xs font-black text-purple-400 uppercase tracking-[0.3em]">Crypto Rewards</h3>
+            <div className="px-2 py-1 bg-purple-500/10 rounded-md border border-purple-500/20">
+                <span className="text-[10px] font-bold text-purple-300">DEVNET</span>
+            </div>
           </div>
+          {onClose && (
+            <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+          )}
       </div>
 
       {!currentUser.solanaWalletAddress ? (
-        <div className="text-center py-4">
-          <p className="text-zinc-500 text-xs mb-4">Connect your Solana wallet to convert your hard-earned points into SOL (Devnet).</p>
+        <div className="text-center py-8">
+          <div className="w-16 h-16 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+              </svg>
+          </div>
+          <p className="text-zinc-400 text-sm mb-6 max-w-xs mx-auto">Connect your Solana wallet to convert your hard-earned points into SOL (Devnet).</p>
           <button
             onClick={handleConnect}
             disabled={isConnecting}
-            className="px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all disabled:opacity-50"
+            className="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all disabled:opacity-50 shadow-lg shadow-purple-500/20"
           >
             {isConnecting ? 'Connecting...' : 'Connect Phantom Wallet'}
           </button>
+          {statusMsg && (
+             <p className="mt-4 text-xs text-rose-400 font-bold">{statusMsg}</p>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
             <div className="bg-zinc-950 rounded-xl p-4 border border-zinc-800">
                 <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-1">Connected Wallet</p>
-                <p className="text-white font-mono text-xs truncate">{currentUser.solanaWalletAddress}</p>
+                <div className="flex items-center justify-between">
+                    <p className="text-white font-mono text-xs truncate w-48">{currentUser.solanaWalletAddress}</p>
+                    <button onClick={() => {
+                        onUpdateUser({ solanaWalletAddress: undefined }); 
+                        setStatusMsg(null);
+                    }} className="text-[10px] text-rose-400 hover:underline uppercase font-bold">Disconnect</button>
+                </div>
                 {balance !== null && (
                     <p className="text-zinc-400 text-xs mt-2">Balance: <span className="text-white font-bold">{balance.toFixed(4)} SOL</span></p>
                 )}
@@ -154,19 +185,21 @@ const SolanaWalletPanel: React.FC<SolanaWalletPanelProps> = ({ currentUser, onUp
                     href={`https://explorer.solana.com/tx/${txSignature}?cluster=devnet`} 
                     target="_blank" 
                     rel="noreferrer"
-                    className="block text-[10px] text-purple-400 hover:underline truncate"
+                    className="block text-[10px] text-purple-400 hover:underline truncate bg-purple-500/10 p-2 rounded-lg"
                 >
                     View TX: {txSignature}
                 </a>
             )}
 
-            <button
-                onClick={handleClaim}
-                disabled={isClaiming || (currentUser.points || 0) <= 0}
-                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-900/20"
-            >
-                {isClaiming ? 'Processing Transaction...' : 'Claim Rewards Now'}
-            </button>
+            <div className="pt-2">
+                <button
+                    onClick={handleClaim}
+                    disabled={isClaiming || (currentUser.points || 0) <= 0}
+                    className="w-full py-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black rounded-xl uppercase tracking-widest text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-purple-900/20"
+                >
+                    {isClaiming ? 'Processing Transaction...' : 'Claim Rewards Now'}
+                </button>
+            </div>
         </div>
       )}
     </div>

@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [isCoachingActive, setIsCoachingActive] = useState<{ exId: string, type: ExerciseType } | null>(null);
   const [feedback, setFeedback] = useState<AnalysisFeedback | null>(null);
   const [isAnalyzingReport, setIsAnalyzingReport] = useState(false);
+  const [isWalletView, setIsWalletView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sortedRoutines = [...routines].sort((a, b) => (b.lastPerformedAt ?? 0) - (a.lastPerformedAt ?? 0));
   const mySplitRoutines = sortedRoutines
@@ -133,6 +134,7 @@ const App: React.FC = () => {
     setIsCoachingActive(null);
     setFeedback(null);
     setIsAnalyzingReport(false);
+    setIsWalletView(false);
     setError(null);
   };
 
@@ -391,9 +393,40 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-sans selection:bg-indigo-500/30 flex flex-col">
-      <Header currentUsername={currentUser.username} currentPoints={currentUser.points ?? 0} onLogout={handleLogout} />
+      <Header 
+        currentUsername={currentUser.username} 
+        currentPoints={currentUser.points ?? 0} 
+        onLogout={handleLogout} 
+        onOpenWallet={() => {
+            setIsWalletView(true);
+            setIsBuilding(false);
+            setEditingSplitGroupId(null);
+            setEditingRoutineId(null);
+            setIsSuggesting(false);
+            setActiveWorkout(null);
+        }}
+        onLogoClick={() => {
+            setIsWalletView(false);
+            setIsBuilding(false);
+            setEditingSplitGroupId(null);
+            setEditingRoutineId(null);
+            setIsSuggesting(false);
+            setActiveWorkout(null);
+            setIsCoachingActive(null);
+            setFeedback(null);
+            setIsAnalyzingReport(false);
+            setError(null);
+        }}
+      />
       
       <main className="flex-1 max-w-4xl mx-auto px-4 py-8 md:py-12 w-full">
+        {isWalletView ? (
+            <SolanaWalletPanel 
+                currentUser={currentUser} 
+                onUpdateUser={(updates) => updateCurrentUserStats(a => ({ ...a, ...updates }))} 
+                onClose={() => setIsWalletView(false)}
+            />
+        ) : (
         <div className="space-y-8">
           
           {/* Dashboard View */}
@@ -470,10 +503,7 @@ const App: React.FC = () => {
                 </div>
               </div>
 
-              <SolanaWalletPanel 
-                currentUser={currentUser} 
-                onUpdateUser={(updates) => updateCurrentUserStats(a => ({ ...a, ...updates }))} 
-              />
+
 
               {routines.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center border-2 border-dashed border-zinc-900 rounded-3xl bg-zinc-900/20">
@@ -724,6 +754,7 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+        )}
       </main>
 
       {/* Overlays */}
