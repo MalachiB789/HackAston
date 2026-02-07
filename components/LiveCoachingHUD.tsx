@@ -198,16 +198,40 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
       try {
         setStatus("Connecting to AI Coach...");
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+        const waitForVideoReady = async (video: HTMLVideoElement) => {
+          if (video.readyState >= 2) {
+            await video.play().catch(() => undefined);
+            return;
+          }
+          await new Promise<void>((resolve) => {
+            const onLoaded = () => {
+              video.removeEventListener('loadedmetadata', onLoaded);
+              resolve();
+            };
+            video.addEventListener('loadedmetadata', onLoaded, { once: true });
+          });
+          await video.play().catch(() => undefined);
+        };
         
         stream = await navigator.mediaDevices.getUserMedia({ 
           video: { facingMode: 'environment', width: 640, height: 480 },
           audio: true 
         });
 
-        if (videoRef.current) videoRef.current.srcObject = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await waitForVideoReady(videoRef.current);
+        }
 
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
         inputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        if (audioContextRef.current.state === 'suspended') {
+          await audioContextRef.current.resume().catch(() => undefined);
+        }
+        if (inputAudioContext.state === 'suspended') {
+          await inputAudioContext.resume().catch(() => undefined);
+        }
 
         const sessionPromise = ai.live.connect({
           model: 'gemini-2.5-flash-native-audio-preview-12-2025',
@@ -219,9 +243,10 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
               const source = inputAudioContext.createMediaStreamSource(stream!);
               const scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
               scriptProcessor.onaudioprocess = (e) => {
+                if (!sessionRef.current || isClosedRef.current) return;
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = createPcmBlob(inputData);
-                sessionPromise.then(s => s.sendRealtimeInput({ media: { data: pcmData, mimeType: 'audio/pcm;rate=16000' } }));
+                sessionRef.current.sendRealtimeInput({ media: { data: pcmData, mimeType: 'audio/pcm;rate=16000' } });
               };
               source.connect(scriptProcessor);
               scriptProcessor.connect(inputAudioContext.destination);
@@ -242,7 +267,9 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
                       return newFrames;
                     });
 
-                    sessionPromise.then(s => s.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } }));
+                    if (sessionRef.current && !isClosedRef.current) {
+                      sessionRef.current.sendRealtimeInput({ media: { data: base64, mimeType: 'image/jpeg' } });
+                    }
                   }
                 }
               }, 1200);
@@ -285,7 +312,10 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
           }
         });
 
-        sessionRef.current = await sessionPromise;
+        sessionPromise.then(s => {
+          sessionRef.current = s;
+        });
+        await sessionPromise;
       } catch (err) {
         console.error(err);
         setStatus("Error: Check permissions");
@@ -299,12 +329,18 @@ const LiveCoachingHUD: React.FC<LiveCoachingHUDProps> = ({ exercise, onComplete,
           const canvas = overlayCanvasRef.current;
           const ctx = canvas.getContext('2d');
           
-          if (ctx) {
+          if (ctx && video.readyState >= 2) {
             canvas.width = video.clientWidth;
             canvas.height = video.clientHeight;
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            const result = poseLandmarkerRef.current.detectForVideo(video, performance.now());
+            let result: any;
+            try {
+              result = poseLandmarkerRef.current.detectForVideo(video, performance.now());
+            } catch (error) {
+              animationFrameId = requestAnimationFrame(render);
+              return;
+            }
             
             if (result.landmarks && result.landmarks.length > 0) {
               const landmarks = result.landmarks[0];
