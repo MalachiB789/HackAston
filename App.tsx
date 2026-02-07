@@ -7,7 +7,7 @@ import WorkoutBuilder from './components/WorkoutBuilder';
 import ActiveWorkoutSession from './components/ActiveWorkoutSession';
 import AISuggestionModal from './components/AISuggestionModal';
 import { analyzeForm } from './services/geminiService';
-import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog } from './types';
+import { AnalysisFeedback, ExerciseType, FrameData, WorkoutRoutine, SetLog, WorkoutHistoryEntry } from './types';
 
 const App: React.FC = () => {
   // Persistence
@@ -17,6 +17,10 @@ const App: React.FC = () => {
   });
 
   const [activeWorkout, setActiveWorkout] = useState<WorkoutRoutine | null>(null);
+  const [workoutHistory, setWorkoutHistory] = useState<WorkoutHistoryEntry[]>(() => {
+    const saved = localStorage.getItem('gymform_history');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [isBuilding, setIsBuilding] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [editingSplitGroupId, setEditingSplitGroupId] = useState<string | null>(null);
@@ -30,9 +34,7 @@ const App: React.FC = () => {
     .filter(r => !!r.splitGroupId)
     .sort((a, b) => (a.dayIndex ?? 999) - (b.dayIndex ?? 999));
   const manualRoutines = sortedRoutines.filter(r => !r.splitGroupId);
-  const historyRoutines = sortedRoutines.filter(
-    r => !!r.lastPerformedAt && r.exercises.some(ex => ex.sets.length > 0)
-  );
+  const sortedHistory = [...workoutHistory].sort((a, b) => b.performedAt - a.performedAt);
   const splitGroups = mySplitRoutines.reduce<Record<string, WorkoutRoutine[]>>((acc, routine) => {
     const groupId = routine.splitGroupId!;
     if (!acc[groupId]) acc[groupId] = [];
@@ -49,6 +51,10 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('gymform_routines', JSON.stringify(routines));
   }, [routines]);
+
+  useEffect(() => {
+    localStorage.setItem('gymform_history', JSON.stringify(workoutHistory));
+  }, [workoutHistory]);
 
   const handleCreateRoutine = (newRoutine: WorkoutRoutine | WorkoutRoutine[]) => {
     const toAdd = Array.isArray(newRoutine) ? newRoutine : [newRoutine];
@@ -93,6 +99,25 @@ const App: React.FC = () => {
 
   const deleteRoutine = (id: string) => {
     setRoutines(routines.filter(r => r.id !== id));
+  };
+
+  const deleteHistoryEntry = (entryId: string) => {
+    setWorkoutHistory(prev => prev.filter(entry => entry.id !== entryId));
+  };
+
+  const deleteAllHistory = () => {
+    setWorkoutHistory([]);
+  };
+
+  const startWorkoutSession = (routine: WorkoutRoutine) => {
+    // Start each session with fresh sets while preserving routine template metadata.
+    setActiveWorkout({
+      ...routine,
+      exercises: routine.exercises.map(ex => ({
+        ...ex,
+        sets: [],
+      })),
+    });
   };
 
   const handleLogSet = (exerciseId: string, set: SetLog) => {
@@ -175,15 +200,23 @@ const App: React.FC = () => {
   const handleFinishWorkoutSession = () => {
     if (!activeWorkout) return;
 
-    const completedWorkout: WorkoutRoutine = {
-      ...activeWorkout,
-      lastPerformedAt: Date.now(),
+    const performedAt = Date.now();
+    const historyEntry: WorkoutHistoryEntry = {
+      id: crypto.randomUUID(),
+      routineId: activeWorkout.id,
+      routineName: activeWorkout.name,
+      splitName: activeWorkout.splitName,
+      performedAt,
+      exercises: activeWorkout.exercises.map(ex => ({
+        ...ex,
+        sets: [...ex.sets],
+      })),
     };
 
-    setRoutines(prev => {
-      const remaining = prev.filter(r => r.id !== completedWorkout.id);
-      return [completedWorkout, ...remaining];
-    });
+    setWorkoutHistory(prev => [historyEntry, ...prev]);
+    setRoutines(prev =>
+      prev.map(r => (r.id === activeWorkout.id ? { ...r, lastPerformedAt: performedAt } : r))
+    );
     setActiveWorkout(null);
   };
 
@@ -285,7 +318,7 @@ const App: React.FC = () => {
                                       </button>
                                     </div>
                                     <button
-                                      onClick={() => setActiveWorkout(routine)}
+                                      onClick={() => startWorkoutSession(routine)}
                                       className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-[10px] transition-all"
                                     >
                                       Start Session
@@ -331,7 +364,7 @@ const App: React.FC = () => {
                               </div>
                             </div>
                             <button
-                              onClick={() => setActiveWorkout(routine)}
+                              onClick={() => startWorkoutSession(routine)}
                               className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-xl uppercase tracking-widest text-[10px] transition-all"
                             >
                               Start Session
@@ -342,13 +375,21 @@ const App: React.FC = () => {
                     </div>
                   )}
 
-                  {historyRoutines.length > 0 && (
+                  {sortedHistory.length > 0 && (
                     <div className="space-y-3">
-                      <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em]">Workout History</h3>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-black text-zinc-500 uppercase tracking-[0.3em]">Workout History</h3>
+                        <button
+                          onClick={deleteAllHistory}
+                          className="px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest bg-rose-600/20 text-rose-300 hover:bg-rose-600/30"
+                        >
+                          Delete All
+                        </button>
+                      </div>
                       <div className="space-y-2">
-                        {historyRoutines.slice(0, 10).map(routine => {
-                          const totalSets = routine.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
-                          const avgScoreRaw = routine.exercises
+                        {sortedHistory.slice(0, 10).map(entry => {
+                          const totalSets = entry.exercises.reduce((acc, ex) => acc + ex.sets.length, 0);
+                          const avgScoreRaw = entry.exercises
                             .flatMap(ex => ex.sets)
                             .filter(set => typeof set.formScore === 'number')
                             .map(set => set.formScore as number);
@@ -357,15 +398,15 @@ const App: React.FC = () => {
                             : null;
 
                           return (
-                            <div key={`${routine.id}-history`} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between">
+                            <div key={entry.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 flex items-center justify-between">
                               <div className="flex-1">
-                                <p className="text-white font-bold">{routine.name}</p>
+                                <p className="text-white font-bold">{entry.routineName}</p>
                                 <p className="text-zinc-500 text-xs">
-                                  {new Date(routine.lastPerformedAt!).toLocaleString()}
+                                  {new Date(entry.performedAt).toLocaleString()}
                                 </p>
                                 <div className="mt-3 space-y-2">
-                                  {routine.exercises.filter(ex => ex.sets.length > 0).map(ex => (
-                                    <div key={`${routine.id}-${ex.id}`} className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-2">
+                                  {entry.exercises.filter(ex => ex.sets.length > 0).map(ex => (
+                                    <div key={`${entry.id}-${ex.id}`} className="bg-zinc-950/50 border border-zinc-800 rounded-lg p-2">
                                       <p className="text-zinc-300 text-[10px] font-black uppercase tracking-widest mb-1">{ex.type}</p>
                                       <div className="flex flex-wrap gap-1">
                                         {ex.sets.map((set, idx) => (
@@ -383,6 +424,15 @@ const App: React.FC = () => {
                                 {avgScore !== null && (
                                   <p className="text-emerald-400 text-xs font-bold uppercase tracking-widest">Avg AI Score: {avgScore}</p>
                                 )}
+                                <button
+                                  onClick={() => deleteHistoryEntry(entry.id)}
+                                  className="mt-2 p-2 rounded-md bg-rose-600/20 text-rose-300 hover:bg-rose-600/30 transition-all"
+                                  title="Delete history entry"
+                                >
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                </button>
                               </div>
                             </div>
                           );

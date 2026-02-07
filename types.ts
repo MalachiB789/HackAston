@@ -41,3 +41,12 @@ export interface WorkoutRoutine {
   dayIndex?: number;
   generatedByAI?: boolean;
 }
+
+export interface WorkoutHistoryEntry {
+  id: string;
+  routineId: string;
+  routineName: string;
+  performedAt: number;
+  splitName?: string;
+  exercises: WorkoutExercise[];
+}
